@@ -4,7 +4,8 @@ Base path `/api`; UTF-8 JSON. Pydantic models in `backend/models.py` and TypeScr
 
 ## Endpoints
 
-- `GET /api/health`: status, service name and phase 2.
+- `GET /api/health`: status, service name and current phase (3).
+- `POST /api/extract-document`: accepts one multipart `file` upload and returns `{filename, file_type, size_bytes, text}` after in-memory text extraction. Supported extensions are `.txt` (UTF-8), `.pdf` (text-based PDFs), and `.docx` (paragraphs and table cells). The filename is reduced to its basename and retained as the source title. The API does not persist files or execute document content.
 - `GET /api/scenarios`: curated scenario inputs; these only provide a fixture verdict when scenario ID, answer and entire source list exactly match.
 - `POST /api/audit`: source-driven audit for every other valid request.
 - `POST /api/stress-experiment`: reruns the same audit engine against a request-local modified copy of a supplied baseline's source context.
@@ -14,6 +15,8 @@ Stress request: `{baseline, operation, source_id, sentence_id?, replacement_text
 The experiment response includes its human-readable label and the exact removed/replaced passage, the original baseline, a fresh perturbed audit, per-claim baseline/perturbed findings and outcomes (`CHANGED`, `UNCHANGED`, `UNRESOLVED`, or `NOT_COMPARABLE`), comparability, and warnings. The backend copies source models before editing them. It does not edit fixture files or the baseline. The perturbed run omits the scenario ID so an edited input cannot accidentally select curated fixture output; it uses the regular `run_audit` path and current optional NLI configuration. A fixture baseline or a baseline/perturbed execution-mode mismatch is marked not directly comparable. Verdicts remain observations, not proof of truth, memory leakage, or evidence independence.
 
 Request shape remains `{answer, sources, scenario_id?}`. Answer is 1–20,000 code points, source count 1–8, source text 1–30,000, title 1–160, and IDs match `[A-Za-z0-9_-]+` and are unique. Whitespace-only text is rejected. Invalid input returns HTTP 422.
+
+Document extraction has an independent default upload-byte limit of 10 MiB per file, configurable with `REFUTELLA_MAX_UPLOAD_BYTES`. The endpoint reads at most one byte beyond that limit and returns 413 when exceeded. PDFs are limited to 200 pages and extraction is capped at 30,000 characters. Unsupported extensions return 415. Empty, malformed, encrypted, mismatched-signature, unsupported-encoding, or text-empty documents return a readable 422. A PDF with no extractable text reports that OCR is unsupported. DOCX archives with more than 20 MiB of uncompressed members are rejected as a bounded extraction safeguard. These checks are for the local prototype and are not a full document security scanner. Extracted output should be passed to the existing audit endpoint as an ordinary source; uploaded and manually entered sources share the eight-source maximum.
 
 ## Response and semantics
 

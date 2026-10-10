@@ -5,6 +5,8 @@ React owns editing and API-driven result rendering. FastAPI validates requests a
 ```mermaid
 flowchart LR
   UI[React workspace] -->|POST /api/audit| API[FastAPI + Pydantic]
+  UI -->|multipart file| U[POST /api/extract-document]
+  U -->|TXT / PDF / DOCX text| UI
   API --> S{Exact fixture input?}
   S -->|yes| F[Curated JSON fixture]
   S -->|no| C[Claim spans]
@@ -21,6 +23,8 @@ flowchart LR
 ```
 
 Claims are sentence spans of the original answer; source passages are original source sentences. Offsets count Python Unicode code points and are half-open. Pydantic checks every claim slice, sentence span, source reference and quote slice before returning the response.
+
+The upload route reads each file in memory with a 10 MiB default cap (`REFUTELLA_MAX_UPLOAD_BYTES`), validates its extension and expected format signature, and extracts UTF-8 text, PDF page text through `pypdf`, or DOCX paragraphs/table cells through `python-docx`. It returns text and a safe basename; the browser adds that text as a normal editable `SourceDocument` with a generated source ID. There is no upload-specific audit service, filesystem persistence, OCR, or external service call. The backend caps extracted text at the existing 30,000-character source limit and checks DOCX archive expansion size before parsing. Complex PDF layouts may not preserve reading order.
 
 Retrieval normalizes Unicode word tokens and ranks sentences with a BM25-style formula. It reserves the top eligible sentence from each source, then fills additional slots to `max(3, source_count)`; one long source cannot crowd out all other documents. Scores only order evidence discovery. They are not claim truth scores. For custom input, support is asserted only for normalized whole-claim/text identity in an unquoted passage. Numeric and date checks require one comparable value/date, compatible units for quantities, highly overlapping content context and no competing values; otherwise the check abstains. Polarity checks require otherwise identical wording with an explicit negation or a small antonym pair, and skip quoted passages. Conflicting evidence is ambiguous; otherwise the verdict abstains as insufficient. Causal ambiguity requires claim wording about causation and an explicit nearby source qualification that it does not state, establish, show or prove causation.
 

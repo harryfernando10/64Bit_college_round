@@ -14,6 +14,8 @@ models/
 *.pth
 dist/
 coverage/
+frontend/test-results/
+frontend/playwright-report/
 .DS_Store
 
 # Local Windows-generated files
