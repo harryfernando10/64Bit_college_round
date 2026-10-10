@@ -71,7 +71,7 @@ The scenario selector loads fixtures through GET /api/scenarios. Select a scenar
 
 ## Limitations
 
-The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Optional NLI can also be wrong and has not had actual runtime inference tested in this environment; it is not calibrated. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. Phase 3 adds a request-scoped Evidence Stress Lab for source/passage removal and passage editing followed by a rerun of the existing engine. These observed outcomes are not a benchmark, reliability estimate, or test of parametric memory leakage; fixture baselines cannot be directly compared with live perturbed engine results. No history or export is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
+The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Optional NLI can also be wrong and is not calibrated. A local CPU smoke test ran in Phase 5A, including one paraphrase misclassification; it does not establish task accuracy. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. Phase 3 adds a request-scoped Evidence Stress Lab for source/passage removal and passage editing followed by a rerun of the existing engine. These observed outcomes are not a benchmark, reliability estimate, or test of parametric memory leakage; fixture baselines cannot be directly compared with live perturbed engine results. No history or export is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
 
 Document extraction is best-effort plain text extraction: PDF columns and complex tables can be reordered, DOCX formatting is discarded, and OCR, password-protected PDFs, legacy `.doc`, and other formats are unsupported. Extraction is not a security scanner for malicious files; this local prototype only applies bounded upload size, basic file-format checks and in-memory parsing.
 
@@ -90,3 +90,9 @@ Recommended checkpoint commands after review:
     git diff --cached --stat
     git commit -m "Build Refutella Phase 1 foundation"
 Inspect branch and git remote -v before any push. These steps do not push.
+
+## Phase 5A credibility foundation
+
+Source-driven audits preserve all answer spans and use narrow transparent triage to mark obvious questions, commands, short headings/transitions, and explicit opinions **Not assessed**. The separate count never means false or unsupported. Select **Include in audit** to override triage for a flagged span. Source IDs remain stable in API traces; the UI shows request-order `S1`, `S2` labels and titles. Findings include a plain-language summary, technical details, and an evidence/verdict guide. A quote found at offsets is provenance only; retrieval is relevance only; neither alone establishes support.
+
+The pinned optional DeBERTa NLI model was smoke-tested on local CPU in Phase 5A. Load took about 17 seconds and pair inference was roughly 0.08–0.29 seconds in the tested environment. One alternate paraphrase was misclassified, so results remain fallible, uncalibrated and off by default. See `docs/RESEARCH_NOTES.md` for exact observations and setup.

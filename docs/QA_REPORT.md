@@ -242,3 +242,16 @@ The optional NLI environment variable remains unset; no model weights or real NL
 ### Updated readiness
 
 **Ready with known limitations.** Scenario, custom audit, evidence trace, Stress Lab and new TXT/PDF/DOCX source workflows passed the tested browser/API checks. Uploads reach the existing audit engine, and manual entry still works. Keep OCR and real NLI out of the demo claims. The multi-source and Stress Lab before screenshots and full keyboard/screen-reader audit remain outstanding; none was silently counted as passed.
+
+## Phase 5A verification (2026-10-10)
+
+Initial Git inspection: branch `phase-5-evidence-intelligence`; working tree clean before edits. No branch switch, commit, push, or merge was performed.
+
+- Backend: `.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider` — **53 passed, 1 skipped** (the opt-in local NLI smoke test), one existing AnyIO deprecation warning. Pytest also printed a Windows temp-directory cleanup `PermissionError` in its atexit cleanup after the successful exit; it did not change the test result.
+- Evaluation: `tests/test_evaluation.py` — **12/12 curated labels**, plus all **3 stress cases** passed. The label counts are a controlled project regression set, not a reliability estimate.
+- Browser: `npm.cmd run test:e2e -- --reporter=list` — **14 passed**, including triage display/override, readable source labels, all prior app flows, and regenerated presentation screenshots. Browser diagnostics found no unexpected console/API failures; intentionally invalid requests are part of the suite.
+- Frontend: `npm.cmd run build` — TypeScript and Vite production build passed.
+- `git diff --check` — passed.
+- NLI: actual local CPU inference **ran** against the pinned weights downloaded to ignored `models/refutella-nli`. Optional runtime versions: PyTorch 2.14.1 CPU, Transformers 4.57.6, SentencePiece 0.2.2, Safetensors 0.8.0, Tokenizers 0.22.2. Model loading took about 17 seconds. Warm pair latencies were approximately 0.08–0.29 seconds. The focused test passed for direct entailment, contradiction, neutral, and a simple paraphrase. A separate “four weeks” / “one month” paraphrase was classified as contradiction. No RAM measurement was available; no general accuracy claim is made. Raw logits are exposed as uncalibrated classifier outputs, not truth probabilities. Default app mode remains baseline unless explicitly configured.
+
+The model-card verification at the pinned revision is documented in `docs/RESEARCH_NOTES.md`. Captured screenshots in `docs/qa-screenshots/` reflect the updated finding presentation.

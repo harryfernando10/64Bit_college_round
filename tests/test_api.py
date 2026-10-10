@@ -269,3 +269,41 @@ def test_api_reports_configured_missing_model_without_network_or_fallback(monkey
  assert data['execution_mode']=='MODEL_UNAVAILABLE'
  assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
  assert 'unavailable' in data['warnings'][0].lower()
+
+def test_triage_marks_obvious_non_assertions_without_dropping_spans():
+ answer = "What color is the room? Use the west entrance.\nOverview\nI think the room is lovely. The room has 48 chairs."
+ sources = [{'source_id':'s','title':'Room note','text':'The room has 48 chairs.'}]
+ data = client.post('/api/audit', json={'answer':answer,'sources':sources}).json()
+ assert [claim['verdict'] for claim in data['claims']] == ['NOT_ASSESSED','NOT_ASSESSED','NOT_ASSESSED','NOT_ASSESSED','SUPPORTED']
+ assert data['summary']['not_assessed'] == 4
+ assert len(data['claims']) == 5
+ for claim in data['claims']:
+  assert answer[claim['start_offset']:claim['end_offset']] == claim['claim_text']
+ assert [claim['claim_id'] for claim in data['claims']] == [f'claim-{i}' for i in range(1,6)]
+
+def test_user_can_override_triage_and_source_labels_follow_current_order():
+ answer='What time is the room open?'
+ sources=[{'source_id':'stable-a','title':'Opening hours.txt','text':'The room opens at 9 AM.'},{'source_id':'uuid-like-92','title':'Additional note','text':'A visitor guide is available.'}]
+ initial=client.post('/api/audit',json={'answer':answer,'sources':sources}).json()
+ assert initial['claims'][0]['verdict']=='NOT_ASSESSED'
+ assert initial['source_labels']=={'stable-a':'S1','uuid-like-92':'S2'}
+ included=client.post('/api/audit',json={'answer':answer,'sources':sources,'assess_claim_ids':['claim-1']}).json()
+ assert included['claims'][0]['verdict']!='NOT_ASSESSED'
+ assert included['claims'][0]['triage_reason']
+ assert included['summary']['not_assessed']==0
+ reordered=client.post('/api/audit',json={'answer':answer,'sources':sources[::-1]}).json()
+ assert reordered['source_labels']=={'uuid-like-92':'S1','stable-a':'S2'}
+
+def test_not_assessed_count_is_distinct_from_evidence_verdicts():
+ data=client.post('/api/audit',json={'answer':'How many chairs are there? The room has 48 chairs.','sources':[{'source_id':'s','title':'Room','text':'The room has 48 chairs.'}]}).json()
+ assert data['summary']['not_assessed']==1
+ assert data['summary']['supported']==1
+ assert data['summary']['total_claims']==2
+
+
+def test_unconfigured_nli_keeps_baseline_mode(monkeypatch):
+ monkeypatch.delenv('REFUTELLA_NLI_MODEL_PATH', raising=False)
+ data=client.post('/api/audit',json={'answer':'The room is open on Monday.','sources':[{'source_id':'stable-room','title':'Room notice','text':'The room is open on Monday.'}]}).json()
+ assert data['execution_mode']=='BASELINE'
+ assert data['claims'][0]['verdict']=='SUPPORTED'
+ assert not data['claims'][0]['semantic_verifications']

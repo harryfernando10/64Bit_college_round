@@ -39,3 +39,14 @@ Use the README PowerShell commands to start the backend and frontend in separate
 - Check keyboard operation, screen-reader labels, reduced-motion behavior and common laptop-width layout.
 
 Playwright coverage exercises the core scenario, custom audit, stress-lab, upload, and responsive flows against the local FastAPI service. See `docs/QA_REPORT.md` for exact results and remaining manual checks. The optional NLI model was not configured or run.
+
+## Phase 5A demo: compare two sources
+
+This is a live baseline example, separate from the curated scenario selector and fixture findings. Use answer `The garden trial ended after four weeks.` and add two sources:
+
+- Primary report: `The garden trial ended after four weeks.`
+- Context note: `The garden trial enrolled 48 plants.`
+
+Run a custom audit, then use Evidence Stress Lab to remove either source. Removing the primary report leaves the second source in context, so the comparison remains meaningful and does not immediately become an empty-context case. The exact-text support result is a narrow text match, not source-authority or world-truth verification.
+
+Question, command, heading and explicit opinion patterns appear as **Not assessed** with an explanation. Select **Include in audit** to run normal claim checks on that span. `S1`, `S2` labels follow current source order; API IDs remain available for traceability.
