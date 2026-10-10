@@ -51,11 +51,13 @@ Open Vite's printed URL (normally http://localhost:5173). The Vite proxy forward
 
 ## Checks
 
-From repository root: run
+From repository root, run the backend suite:
     .venv/Scripts/python.exe -m pytest
-From frontend:
+Run only the reproducible API evaluation and print its counts:
+    .venv/Scripts/python.exe -m pytest tests/test_evaluation.py -q -s -p no:cacheprovider
+From `frontend/`, run the TypeScript check and production build:
     npm run build
-The latter runs TypeScript checks and a production build. These commands are not claims that checks passed; see Context.md.
+The build command runs TypeScript checks and a production build. The evaluation uses 12 fixed single-claim API cases with defensible expected labels and three fixed Evidence Stress Lab behavior cases. One paraphrase case uses a deterministic mocked NLI entailment; it does not measure real model performance. The command prints observed and expected verdict counts, confusion counts and exact-label accuracy. These curated, rule-aligned cases are a regression set, not evidence of general real-world reliability, benchmark superiority or calibrated confidence. No model download or network is needed. See `docs/TEST_PLAN.md` and `docs/DEMO_WALKTHROUGH.md`.
 
 ## Sample data and reset
 
@@ -64,6 +66,10 @@ The scenario selector loads fixtures through GET /api/scenarios. Select a scenar
 ## Limitations
 
 The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Optional NLI can also be wrong and has not had actual runtime inference tested in this environment; it is not calibrated. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. Phase 3 adds a request-scoped Evidence Stress Lab for source/passage removal and passage editing followed by a rerun of the existing engine. These observed outcomes are not a benchmark, reliability estimate, or test of parametric memory leakage; fixture baselines cannot be directly compared with live perturbed engine results. No history or export is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
+
+## Repeatable demo
+
+Follow [the demo walkthrough](docs/DEMO_WALKTHROUGH.md) for a short sequence using existing fixtures and custom source-driven examples. It records the expected mode labels and cautions where results depend on the current deterministic engine.
 
 ## Team workflow and Git checkpoint
 

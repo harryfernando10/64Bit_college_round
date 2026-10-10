@@ -1,0 +1,5 @@
+[
+  {"id":"stress-remove-source-001","operation":"REMOVE_SOURCE","source_id":"support","expected_outcome":"UNRESOLVED","expected_verdict":"INSUFFICIENT_EVIDENCE","rationale":"Removing the only exact supporting source should leave the claim unresolved."},
+  {"id":"stress-remove-passage-001","operation":"REMOVE_PASSAGE","source_id":"report","passage_text":"The garden trial ended after four weeks.","expected_outcome":"UNRESOLVED","expected_verdict":"INSUFFICIENT_EVIDENCE","rationale":"Removing the only retrieved supporting passage should remove the basis for support."},
+  {"id":"stress-edit-passage-001","operation":"EDIT_PASSAGE","source_id":"report","passage_text":"The garden trial ended after four weeks.","replacement_text":"The garden trial lasted about one month.","expected_outcome":"UNRESOLVED","expected_verdict":"INSUFFICIENT_EVIDENCE","rationale":"Editing exact supporting wording to a paraphrase should not retain baseline support without NLI."}
+]
