@@ -9,6 +9,8 @@ from pathlib import Path
 from uuid import uuid4
 from backend.models import *
 from backend.verifier import NliResult, load_local_verifier
+from backend.review_flags import review_claim
+import hashlib
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "data" / "scenarios"
@@ -49,6 +51,27 @@ def _tokens(text):
 
 def _normal(text):
     return " ".join(_tokens(text))
+
+def _duplicate_sources(sources):
+    """Conservative text similarity; IDs are stable and filenames are ignored."""
+    duplicates = {}
+    canonical = []
+    for source in sources:
+        normalized = _normal(source.text)
+        digest = hashlib.sha256(normalized.encode("utf8")).hexdigest()
+        duplicate = next((sid for sid, _, other_digest, _ in canonical if digest == other_digest), None)
+        sentence_sets = [set(_tokens(sentence.text)) for sentence in split_sentences(source.text, source.source_id)
+                         if len(_tokens(sentence.text)) >= 8]
+        if duplicate is None and sentence_sets:
+            for sid, _, other_digest, other_sentences in canonical:
+                if any(min(len(left), len(right)) >= 8 and len(left & right) / max(len(left | right), 1) >= .90
+                       for left in sentence_sets for right in other_sentences):
+                    duplicate = sid; break
+        if duplicate:
+            duplicates[source.source_id] = duplicate
+        else:
+            canonical.append((source.source_id, normalized, digest, sentence_sets))
+    return duplicates
 
 def _rank(claim, sentences):
     """BM25-style lexical discovery score; ranking is not a truth score."""
@@ -182,10 +205,13 @@ def configured_verifier():
 
 def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=False):
     triage = _triage_reason(claim.text)
+    duplicates = _duplicate_sources(request.sources)
+    labels = {source.source_id: f"S{n+1}" for n, source in enumerate(request.sources)}
     if triage and not assess_flagged:
         return ClaimFinding(claim_id=f"claim-{i+1}", claim_text=claim.text, start_offset=claim.start_offset,
             end_offset=claim.end_offset, verdict=Verdict.NOT_ASSESSED, verification_tier=VerificationTier.INSUFFICIENT,
-            note=triage, triage_reason=triage, plain_summary=triage)
+            note=triage, triage_reason=triage, plain_summary=triage,
+            search_receipt=SearchReceipt(status="NOT_ASSESSED", reason_code="NOT_ASSESSED"))
     ranked = _rank(claim.text, sentences)
     # Candidate threshold is intentionally permissive for evidence discovery, never verdict selection.
     eligible = [(score, s) for score, s in ranked if score >= 0.5]
@@ -203,8 +229,16 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
         if sent not in candidates:
             candidates.append(sent)
     refs = []
+    receipt_candidates = []
     for s in candidates:
         source_id = s.sentence_id.rsplit("-s", 1)[0]
+        source = next(src for src in request.sources if src.source_id == source_id)
+        duplicate_of = duplicates.get(source_id)
+        matched = sorted(set(_tokens(claim.text)) & set(_tokens(s.text)))
+        reason = "DUPLICATE_SOURCE" if duplicate_of else "RETRIEVED_UNRESOLVED"
+        receipt_candidates.append(ReceiptCandidate(source_id=source_id, source_label=labels[source_id], source_title=source.title,
+            sentence_id=s.sentence_id, snippet=s.text, start_offset=s.start_offset, end_offset=s.end_offset,
+            matched_terms=matched, reason_code=reason, duplicate_of=duplicate_of))
         refs.append(EvidenceReference(source_id=source_id, sentence_id=s.sentence_id, quote=s.text,
             start_offset=s.start_offset, end_offset=s.end_offset, quotation_validated=True))
     checks=[]; conflict=False; supported=False; contradiction=None
@@ -257,8 +291,8 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
         if model_unknown:
             note += " NLI verification was unavailable or inconclusive; this verdict relies on the deterministic check only."
     elif model_contradictions:
-        verdict, tier = Verdict.CONTRADICTED, VerificationTier.MODEL
-        note = "The local NLI verifier judged retrieved evidence contradictory to the claim; its output is uncalibrated and fallible."
+        verdict, tier = Verdict.AMBIGUOUS, VerificationTier.MODEL_FLAG
+        note = "The local verifier flagged a possible conflict, but no deterministic contradiction rule confirmed it. NLI output is uncalibrated and fallible."
     elif model_entailments:
         verdict, tier = Verdict.SUPPORTED, VerificationTier.MODEL
         note = "The local NLI verifier judged retrieved evidence to entail the claim; its output is uncalibrated and fallible."
@@ -275,10 +309,30 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
         "Relevant passages were found, but no implemented check established support or contradiction." if refs else
         "No relevant passage was retrieved from the supplied sources." if verdict == Verdict.INSUFFICIENT_EVIDENCE else
         f"The supplied evidence was assessed as {verdict.value.replace('_', ' ').lower()}." if not triage else f"Included for assessment by request. {triage}")
-    return ClaimFinding(claim_id=f"claim-{i+1}", claim_text=claim.text, start_offset=claim.start_offset, end_offset=claim.end_offset,
+    finding_id = f"claim-{i+1}"
+    flag_candidates = [{"source_id": c.source_id, "source_label": c.source_label, "source_title": c.source_title,
+        "sentence_id": c.sentence_id, "start_offset": c.start_offset, "end_offset": c.end_offset, "text": c.snippet}
+        for c in receipt_candidates]
+    receipt_status = "RETRIEVED" if receipt_candidates else ("SOURCE_EMPTY" if all(not src.text.strip() for src in request.sources) else "NO_CANDIDATE")
+    receipt_reason = "RETRIEVED_UNRESOLVED" if receipt_candidates else ("SOURCE_EMPTY" if receipt_status == "SOURCE_EMPTY" else "NO_CANDIDATE")
+    for candidate in receipt_candidates:
+        if candidate.duplicate_of:
+            continue
+        if contradiction and candidate.sentence_id == contradiction.sentence_id:
+            candidate.reason_code = "CONTRADICTION_RULE"
+        elif any(ref.sentence_id == candidate.sentence_id for ref in model_entailments):
+            candidate.reason_code = "MODEL_ENTAILMENT"
+        elif any(ref.sentence_id == candidate.sentence_id for ref in model_contradictions):
+            candidate.reason_code = "MODEL_CONFLICT"
+        elif supported and any(ref.sentence_id == candidate.sentence_id for ref in refs):
+            candidate.reason_code = "SUPPORT_RULE"
+    return ClaimFinding(claim_id=finding_id, claim_text=claim.text, start_offset=claim.start_offset, end_offset=claim.end_offset,
         triage_reason=triage, plain_summary=plain_summary,
         verdict=verdict, verification_tier=tier, evidence=refs, deterministic_checks=checks,
-        semantic_verifications=semantic, note=note, model_score=None, model_score_calibrated=None)
+        semantic_verifications=semantic, note=note, model_score=None, model_score_calibrated=None,
+        search_receipt=SearchReceipt(query_terms=list(dict.fromkeys(_tokens(claim.text))), status=receipt_status,
+            candidates=receipt_candidates, reason_code=receipt_reason),
+        review_flags=review_claim(finding_id, claim.text, flag_candidates))
 
 def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
     data = _fixture(request.scenario_id) if request.scenario_id else None
@@ -314,7 +368,8 @@ def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
         sentence_map = {s.source_id: split_sentences(s.text, s.source_id) for s in request.sources}
     counts = {v: sum(c.verdict == v for c in claims) for v in Verdict}
     labels = {source.source_id: f"S{i+1}" for i, source in enumerate(request.sources)}
-    return AuditResponse(audit_id=f"audit-{uuid4().hex[:12]}", execution_mode=mode, answer=request.answer, sources=request.sources, source_sentences=sentence_map, source_labels=labels, claims=claims, summary=AuditSummary(supported=counts[Verdict.SUPPORTED], contradicted=counts[Verdict.CONTRADICTED], insufficient_evidence=counts[Verdict.INSUFFICIENT_EVIDENCE], ambiguous=counts[Verdict.AMBIGUOUS], not_assessed=counts[Verdict.NOT_ASSESSED], total_claims=len(claims)), warnings=warnings)
+    duplicates = _duplicate_sources(request.sources)
+    return AuditResponse(audit_id=f"audit-{uuid4().hex[:12]}", execution_mode=mode, answer=request.answer, sources=request.sources, source_sentences=sentence_map, source_labels=labels, claims=claims, summary=AuditSummary(supported=counts[Verdict.SUPPORTED], contradicted=counts[Verdict.CONTRADICTED], insufficient_evidence=counts[Verdict.INSUFFICIENT_EVIDENCE], ambiguous=counts[Verdict.AMBIGUOUS], not_assessed=counts[Verdict.NOT_ASSESSED], total_claims=len(claims)), warnings=warnings, duplicate_sources=duplicates)
 
 def run_stress_experiment(experiment: StressExperimentRequest) -> StressExperimentResponse:
     """Rerun the regular engine over immutable, request-local source copies."""

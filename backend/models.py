@@ -15,6 +15,7 @@ class Verdict(StrEnum):
 class VerificationTier(StrEnum):
     MECHANICAL = "MECHANICAL"
     MODEL = "MODEL"
+    MODEL_FLAG = "MODEL_FLAG"
     INSUFFICIENT = "INSUFFICIENT"
 
 class ExecutionMode(StrEnum):
@@ -72,6 +73,40 @@ class EvidenceReference(BaseModel):
     end_offset: int = Field(ge=1)
     quotation_validated: bool
 
+class ReceiptCandidate(BaseModel):
+    source_id: str
+    source_label: str
+    source_title: str
+    sentence_id: str
+    snippet: str
+    start_offset: int
+    end_offset: int
+    matched_terms: list[str] = []
+    reason_code: str
+    duplicate_of: str | None = None
+
+class SearchReceipt(BaseModel):
+    query_terms: list[str] = []
+    status: Literal["RETRIEVED", "NO_CANDIDATE", "SOURCE_EMPTY", "NOT_ASSESSED"]
+    candidates: list[ReceiptCandidate] = []
+    reason_code: str
+
+class ReviewFlag(BaseModel):
+    flag_id: str
+    flag_type: Literal["CERTAINTY_DRIFT", "ADVICE_REVIEW", "INFERENCE_REVIEW"]
+    explanation: str
+    answer_wording: str
+    source_wording: str
+    source_id: str | None = None
+    source_label: str | None = None
+    source_title: str | None = None
+    sentence_id: str | None = None
+    start_offset: int | None = None
+    end_offset: int | None = None
+    rule_id: str
+    caveat_sentences: list[str] = []
+    limitations: str
+
 class DeterministicCheck(BaseModel):
     check_type: str
     status: Literal["MATCH", "MISMATCH", "NOT_CHECKED"]
@@ -106,6 +141,8 @@ class ClaimFinding(BaseModel):
     model_score: float | None = Field(default=None, ge=0, le=1)
     model_score_calibrated: Literal[False] | None = None
     severity: Literal["LOW", "MEDIUM", "HIGH"] | None = None
+    search_receipt: SearchReceipt | None = None
+    review_flags: list[ReviewFlag] = []
 
 class AuditSummary(BaseModel):
     supported: int = Field(ge=0)
@@ -125,6 +162,7 @@ class AuditResponse(BaseModel):
     claims: list[ClaimFinding]
     summary: AuditSummary
     warnings: list[str] = []
+    duplicate_sources: dict[str, str] = {}
 
     @model_validator(mode="after")
     def validate_integrity(self):

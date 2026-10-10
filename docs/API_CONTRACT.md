@@ -1,4 +1,4 @@
-# API Contract — Phase 3
+# API Contract — Phase 5B
 
 Base path `/api`; UTF-8 JSON. Pydantic models in `backend/models.py` and TypeScript definitions in `frontend/src/types.ts` are canonical. Extra request properties are rejected.
 
@@ -40,3 +40,11 @@ Every source-driven answer span remains visible with exact Unicode code-point of
 Every audit response includes `source_labels` mapping stable source IDs to ordered `S1`, `S2`, etc. Labels reflect the current request order after removal/reordering; IDs remain the traceable identity. The UI emphasizes label and title, with the stable ID available in detail/hover and all API evidence references.
 
 Findings provide a plain-language summary and a separate technical-details disclosure for rule/verifier mode, source and passage references, excerpts, offsets, checks, model outputs, and warnings. “Exact quote found” means only that the excerpt exists at the returned source offsets. Retrieval means a passage was selected as relevant; it does not establish support. NLI outputs are raw uncalibrated classifier scores, not truth probabilities. `NOT_ASSESSED` is distinct from all four evidence verdicts.
+
+## Phase 5B evidence intelligence and review cues
+
+Each source-driven finding contains `search_receipt`: query terms, receipt state/reason, and the ranked passages selected during that same retrieval operation. Candidate entries retain exact snippets, half-open source offsets, source labels/titles/stable IDs, matched query terms, and a machine reason code. Duplicate candidates carry `duplicate_of`; source text is not removed. `duplicate_sources` maps exact normalized-text or conservative high sentence-token-Jaccard matches to the first source ID. Filenames do not imply independence. Receipts distinguish `RETRIEVED`, `NO_CANDIDATE`, `SOURCE_EMPTY`, and `NOT_ASSESSED`.
+
+`review_flags` are separate from verdicts. Narrow rules identify certainty/scope strengthening, advice requiring human review, and inference cues for premise review. Each flag includes matched wording, rule ID, related retrieved source/passage and offsets when available, caveats found in that passage, and limitations. No caveat found means only that none was found in the retrieved passage. Flags do not provide safety decisions or establish a reasoning fallacy.
+
+An NLI-only contradiction is returned as `AMBIGUOUS` with verification tier `MODEL_FLAG` and an explicit note that no deterministic contradiction rule confirmed it. `CONTRADICTED` is reserved for deterministic contradiction rules. NLI entailment remains limited to passages returned with a search receipt; all outputs remain uncalibrated.

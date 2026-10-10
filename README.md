@@ -96,3 +96,7 @@ Inspect branch and git remote -v before any push. These steps do not push.
 Source-driven audits preserve all answer spans and use narrow transparent triage to mark obvious questions, commands, short headings/transitions, and explicit opinions **Not assessed**. The separate count never means false or unsupported. Select **Include in audit** to override triage for a flagged span. Source IDs remain stable in API traces; the UI shows request-order `S1`, `S2` labels and titles. Findings include a plain-language summary, technical details, and an evidence/verdict guide. A quote found at offsets is provenance only; retrieval is relevance only; neither alone establishes support.
 
 The pinned optional DeBERTa NLI model was smoke-tested on local CPU in Phase 5A. Load took about 17 seconds and pair inference was roughly 0.08–0.29 seconds in the tested environment. One alternate paraphrase was misclassified, so results remain fallible, uncalibrated and off by default. See `docs/RESEARCH_NOTES.md` for exact observations and setup.
+
+## Phase 5B evidence intelligence
+
+Audits return per-claim Search Receipts containing retrieved passages, exact source offsets, matched terms, and reason codes. Similar source text is annotated without removing sources or implying independent provenance. A claim/source evidence matrix and separate certainty, advice, and inference review cues support human inspection. Review flags do not affect verdicts. An NLI-only contradiction is labeled ambiguous until a deterministic contradiction rule confirms it.

@@ -201,7 +201,9 @@ def test_mock_nli_contradiction_and_neutral_are_distinct():
  passage='The office is closed on Monday.'
  contra=MockVerifier({passage:'CONTRADICTION'})
  result=_model_audit('The office is staffed on Monday.',[{'source_id':'s','title':'Note','text':passage}],contra)
- assert result.claims[0].verdict.value=='CONTRADICTED'
+ assert result.claims[0].verdict.value=='AMBIGUOUS'
+ assert result.claims[0].verification_tier.value=='MODEL_FLAG'
+ assert 'no deterministic contradiction rule confirmed' in result.claims[0].note
  neutral=MockVerifier({passage:'NEUTRAL'})
  result=_model_audit('The office will be staffed on Monday.',[{'source_id':'s','title':'Note','text':passage}],neutral)
  assert result.claims[0].verdict.value=='INSUFFICIENT_EVIDENCE'
