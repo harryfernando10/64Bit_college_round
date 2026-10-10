@@ -15,7 +15,7 @@ import hashlib
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "data" / "scenarios"
 TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
-NUMBER = re.compile(r"(?<!\w)[+-]?\d+(?:\.\d+)?(?:\s*(?:%|cm|mm|m|km|kg|g|mg|°[CF]|hours?|days?|years?))?", re.I)
+NUMBER = re.compile(r"(?<!\w)[+-]?\d+(?:\.\d+)?(?:\s*(?:%|cm|mm|m|km|kg|g|mg|°[CF]|hours?|days?|weeks?|months?|years?))?", re.I)
 NEGATIONS = {"not", "no", "never", "neither", "cannot", "cant", "without", "doesnt", "isnt", "arent", "wont"}
 CONTEXT_STOPWORDS = {"the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "to", "of", "in", "on", "at", "for", "by", "and", "or", "it", "this", "that", "with", "from", "as", "after", "before"}
 
@@ -95,7 +95,7 @@ def _values(text):
     values = []
     for match in NUMBER.finditer(without_dates):
         raw_number = re.search(r"[+-]?\d+(?:\.\d+)?", match.group(0)).group(0)
-        unit_match = re.search(r"(?:%|cm|mm|km|m|kg|mg|g|°[CF]|hours?|days?|years?)$", match.group(0).strip(), re.I)
+        unit_match = re.search(r"(?:%|cm|mm|km|m|kg|mg|g|°[CF]|hours?|days?|weeks?|months?|years?)$", match.group(0).strip(), re.I)
         try:
             value = Decimal(raw_number).normalize()
         except InvalidOperation:
@@ -167,6 +167,16 @@ def _check(claim, passage):
         mismatch = cvals != evals
         checks.append(DeterministicCheck(check_type="quantity_or_unit", status="MISMATCH" if mismatch else "MATCH", detail=f"Compared values in shared context: claim {cvals}; passage {evals}."))
         if mismatch: return "CONTRADICTED", checks, "The retrieved passage gives a different quantity or unit for the same overlapping context."
+    # Days and weeks have a fixed conversion. Calendar months deliberately do
+    # not: their length varies, so month/week pairs abstain from this rule.
+    duration_days = {"day": Decimal(1), "days": Decimal(1), "week": Decimal(7), "weeks": Decimal(7)}
+    if len(cvals) == len(evals) == 1 and cvals[0][1] in duration_days and evals[0][1] in duration_days and same_context:
+        claim_days = cvals[0][0] * duration_days[cvals[0][1]]
+        passage_days = evals[0][0] * duration_days[evals[0][1]]
+        mismatch = claim_days != passage_days
+        checks.append(DeterministicCheck(check_type="duration", status="MISMATCH" if mismatch else "MATCH",
+            detail=f"Compared durations using the fixed day/week conversion: claim {claim_days} days; passage {passage_days} days."))
+        if mismatch: return "CONTRADICTED", checks, "The retrieved passage gives a different duration after a fixed day/week conversion."
     if len(date_c) == len(date_e) == 1 and same_context:
         mismatch = date_c != date_e
         checks.append(DeterministicCheck(check_type="date", status="MISMATCH" if mismatch else "MATCH", detail=f"Compared dates in shared context: claim {date_c}; passage {date_e}."))
