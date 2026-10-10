@@ -22,8 +22,8 @@ Reviewer chooses a sample or enters answer and sources, runs audit, inspects ver
 | FR-07 | Validate references without equating quote existence with truth. | 1 | Integrity checks. |
 | FR-08 | Provide loading, empty, invalid and backend-error states. | 1 | UI/manual acceptance. |
 | FR-09 | Decompose text into carefully qualified claims. | Later | Claim segmentation evaluation. |
-| FR-10 | Retrieve evidence and apply narrow checks plus optional verifier. | Later | Reproducible evaluation. |
-| FR-11 | Add source mutations, audit diffs, export and history. | Later | Stress Lab and history tests. |
+| FR-10 | Retrieve evidence and apply narrow checks plus optional verifier. | 2 | API tests and mocked verifier cases; no real-model evaluation claim. |
+| FR-11 | Add source mutations and audit comparisons. | 3 | Stress Lab endpoint tests; export/history remain out of scope. |
 | FR-12 | Evaluate unsafe recommendation flags with stated limits. | Later | Curated safety evaluation. |
 
 ## Non-functional requirements
@@ -36,7 +36,7 @@ IDs are constrained and unique. Text lengths are bounded. Offsets are half-open 
 Invalid payloads: FastAPI 422. Backend unavailable: UI guidance and retry. Unmatched/custom input: fixture mode, insufficient findings and warning. Future verifier failure: preserve mechanical results and mark unresolved checks insufficient.
 
 ## Out of scope
-Database, accounts, deployment, OCR, internet fact checking, hosted LLM, downloaded weights, robust linguistic segmentation, safety advice, history/export, Evidence Stress Lab.
+Database, accounts, deployment, OCR, internet fact checking, hosted LLM, bundled model weights, robust linguistic segmentation, safety advice, and history/export.
 
 ## Assumptions and acceptance
 Python 3.11+, Node 20+, local use, short hackathon window, no confirmed hosted LLM. JSON is adequate for scenarios. Acceptance includes working frontend/backend, health 200, actual API sample audit rendered, fixture label, matching contracts and offsets, passing tests/build, all docs, documented model status and known limitations.
