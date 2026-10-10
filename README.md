@@ -10,6 +10,10 @@ Intended users include readers, researchers, students, and reviewers. The long-t
 
 React/TypeScript/Vite/Tailwind frontend; Python/FastAPI/Pydantic backend; version-controlled JSON fixtures; API-loaded scenario picker; validated character spans; useful errors and fixture labels. Exact unchanged fixture inputs retain their curated results. Other inputs use a local evidence-based baseline: sentence-span claims, BM25-style lexical passage retrieval and narrow number/date/polarity checks. In baseline mode, support requires normalized whole-claim textual identity; optional model mode can additionally use NLI for paraphrased passages. Lexical similarity alone never supports a claim. An optional local NLI verifier can be enabled with pre-installed dependencies and locally cached model files; it is off by default and makes no audit-time network calls. Quote validation proves presence at offsets, not truth.
 
+## Phase 3
+
+The Evidence Stress Lab uses the current audit as its baseline and reruns the same audit engine after removing one source, removing a retrieved passage, or editing that passage. Results are request-scoped and include claim-by-claim verdicts and evidence. Fixture baselines and differing execution modes are flagged as not directly comparable. See `POST /api/stress-experiment` in the API contract. The controlled examples are not a general evaluation or a test of parametric memory leakage.
+
 ## Structure
 
 - frontend/src: UI, styles, API types
@@ -59,7 +63,7 @@ The scenario selector loads fixtures through GET /api/scenarios. Select a scenar
 
 ## Limitations
 
-The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Optional NLI can also be wrong and has not had actual runtime inference tested in this environment; it is not calibrated. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. No history, export or source-edit experiment is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
+The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Optional NLI can also be wrong and has not had actual runtime inference tested in this environment; it is not calibrated. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. Phase 3 adds a request-scoped Evidence Stress Lab for source/passage removal and passage editing followed by a rerun of the existing engine. These observed outcomes are not a benchmark, reliability estimate, or test of parametric memory leakage; fixture baselines cannot be directly compared with live perturbed engine results. No history or export is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
 
 ## Team workflow and Git checkpoint
 

@@ -281,3 +281,95 @@ def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
         sentence_map = {s.source_id: split_sentences(s.text, s.source_id) for s in request.sources}
     counts = {v: sum(c.verdict == v for c in claims) for v in Verdict}
     return AuditResponse(audit_id=f"audit-{uuid4().hex[:12]}", execution_mode=mode, answer=request.answer, sources=request.sources, source_sentences=sentence_map, claims=claims, summary=AuditSummary(supported=counts[Verdict.SUPPORTED], contradicted=counts[Verdict.CONTRADICTED], insufficient_evidence=counts[Verdict.INSUFFICIENT_EVIDENCE], ambiguous=counts[Verdict.AMBIGUOUS], total_claims=len(claims)), warnings=warnings)
+
+def run_stress_experiment(experiment: StressExperimentRequest) -> StressExperimentResponse:
+    """Rerun the regular engine over immutable, request-local source copies."""
+    baseline = experiment.baseline
+    sources = [source.model_copy(deep=True) for source in baseline.sources]
+    source = next((item for item in sources if item.source_id == experiment.source_id), None)
+    if source is None:
+        raise ValueError(f"Unknown source_id: {experiment.source_id}")
+
+    sentence = None
+    if experiment.operation != "REMOVE_SOURCE":
+        sentence = next((item for item in baseline.source_sentences[source.source_id]
+                         if item.sentence_id == experiment.sentence_id), None)
+        if sentence is None:
+            raise ValueError(f"Unknown sentence_id {experiment.sentence_id!r} for source {source.source_id}")
+        if not any(ref.source_id == source.source_id and ref.sentence_id == sentence.sentence_id
+                   for claim in baseline.claims for ref in claim.evidence):
+            raise ValueError("The selected sentence is not a retrieved evidence passage in the baseline")
+
+    changed_text = ""
+    label = ""
+    if experiment.operation == "REMOVE_SOURCE":
+        sources = [item for item in sources if item.source_id != source.source_id]
+        changed_text = source.text
+        label = f"Removed source {source.source_id} — {source.title}"
+    elif experiment.operation == "REMOVE_PASSAGE":
+        changed_text = sentence.text
+        source.text = source.text[:sentence.start_offset] + source.text[sentence.end_offset:]
+        if not source.text.strip():
+            sources = [item for item in sources if item.source_id != source.source_id]
+        label = f"Removed passage {sentence.sentence_id} from {source.source_id}"
+    else:
+        changed_text = experiment.replacement_text or ""
+        if changed_text == sentence.text:
+            raise ValueError("Replacement text is unchanged from the selected passage")
+        source.text = source.text[:sentence.start_offset] + changed_text + source.text[sentence.end_offset:]
+        label = f"Edited passage {sentence.sentence_id} in {source.source_id}"
+
+    if not sources:
+        comparison = [StressClaimComparison(claim_id=c.claim_id, claim_text=c.claim_text,
+            baseline=c, perturbed=None, outcome="NOT_COMPARABLE",
+            explanation="No source context remains, so the audit engine cannot run with its required non-empty source set.",
+            baseline_execution_mode=baseline.execution_mode, perturbed_execution_mode=None)
+            for c in baseline.claims]
+        warnings = ["The experiment removed the entire source context; no perturbed audit was run."]
+        if baseline.execution_mode == ExecutionMode.FIXTURE:
+            warnings.append("The baseline used curated fixture findings; the empty-context experiment cannot be directly compared with them.")
+        return StressExperimentResponse(experiment_label=label, changed_source_id=source.source_id,
+            changed_sentence_id=experiment.sentence_id, changed_text=changed_text, baseline=baseline,
+            perturbed=None, comparisons=comparison, comparable=False,
+            warnings=warnings)
+
+    try:
+        request = AuditRequest(answer=baseline.answer, sources=sources, scenario_id=None)
+        perturbed = run_audit(request)
+    except Exception as exc:
+        if isinstance(exc, (ValueError,)):
+            raise
+        raise ValueError(f"The experiment could not be audited: {exc}") from exc
+    by_id = {claim.claim_id: claim for claim in perturbed.claims}
+    comparisons = []
+    modes_comparable = baseline.execution_mode == perturbed.execution_mode and baseline.execution_mode != ExecutionMode.FIXTURE
+    for original in baseline.claims:
+        updated = by_id.get(original.claim_id)
+        if not modes_comparable:
+            outcome = "NOT_COMPARABLE"
+            explanation = ("The baseline is a curated fixture and the perturbed result comes from the audit engine; verdict differences are not directly comparable."
+                           if baseline.execution_mode == ExecutionMode.FIXTURE else
+                           f"Execution modes differ ({baseline.execution_mode.value} vs {perturbed.execution_mode.value}); verdict differences are not directly comparable.")
+        elif updated is None:
+            outcome = "NOT_COMPARABLE"
+            explanation = "The perturbed audit returned no corresponding claim."
+        elif updated.verdict != original.verdict:
+            outcome = "UNRESOLVED" if updated.verdict == Verdict.INSUFFICIENT_EVIDENCE else "CHANGED"
+            explanation = f"The verdict changed from {original.verdict.value} to {updated.verdict.value} in the returned audit."
+        else:
+            outcome = "UNCHANGED"
+            explanation = f"Both audits returned {original.verdict.value}; this result alone does not indicate evidence independence or model memory leakage."
+        comparisons.append(StressClaimComparison(claim_id=original.claim_id, claim_text=original.claim_text,
+            baseline=original, perturbed=updated, outcome=outcome, explanation=explanation,
+            baseline_execution_mode=baseline.execution_mode,
+            perturbed_execution_mode=perturbed.execution_mode if updated is not None else None))
+    warnings = [f"Baseline ({baseline.execution_mode.value}): {warning}" for warning in baseline.warnings]
+    warnings.extend(f"Perturbed ({perturbed.execution_mode.value}): {warning}" for warning in perturbed.warnings)
+    if baseline.execution_mode == ExecutionMode.FIXTURE:
+        warnings.append("The baseline used curated fixture findings; the perturbed audit uses the live engine, so mode differences limit direct comparability.")
+    if baseline.execution_mode != perturbed.execution_mode:
+        warnings.append(f"Execution modes differ ({baseline.execution_mode.value} baseline, {perturbed.execution_mode.value} perturbed).")
+    return StressExperimentResponse(experiment_label=label, changed_source_id=source.source_id,
+        changed_sentence_id=experiment.sentence_id, changed_text=changed_text, baseline=baseline,
+        perturbed=perturbed, comparisons=comparisons, comparable=modes_comparable,
+        warnings=warnings)

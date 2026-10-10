@@ -1,4 +1,4 @@
-# API Contract — Phase 2
+# API Contract — Phase 3
 
 Base path `/api`; UTF-8 JSON. Pydantic models in `backend/models.py` and TypeScript definitions in `frontend/src/types.ts` are canonical. Extra request properties are rejected.
 
@@ -7,6 +7,11 @@ Base path `/api`; UTF-8 JSON. Pydantic models in `backend/models.py` and TypeScr
 - `GET /api/health`: status, service name and phase 2.
 - `GET /api/scenarios`: curated scenario inputs; these only provide a fixture verdict when scenario ID, answer and entire source list exactly match.
 - `POST /api/audit`: source-driven audit for every other valid request.
+- `POST /api/stress-experiment`: reruns the same audit engine against a request-local modified copy of a supplied baseline's source context.
+
+Stress request: `{baseline, operation, source_id, sentence_id?, replacement_text?}`. `baseline` is the complete validated `AuditResponse` previously returned by `/api/audit`. Operations are `REMOVE_SOURCE`, `REMOVE_PASSAGE`, and `EDIT_PASSAGE`. Passage operations require a sentence ID that was actually retrieved as evidence in the baseline. Edit requires non-whitespace replacement text that differs from the selected passage. Extra fields and malformed requests return 422; unknown sources/passages, non-retrieved passages, unchanged edits, and invalid modified source documents also return useful 422 errors. If the operation removes all source context, the API responds successfully with `comparable: false`, no perturbed audit, and `NOT_COMPARABLE` claim outcomes.
+
+The experiment response includes its human-readable label and the exact removed/replaced passage, the original baseline, a fresh perturbed audit, per-claim baseline/perturbed findings and outcomes (`CHANGED`, `UNCHANGED`, `UNRESOLVED`, or `NOT_COMPARABLE`), comparability, and warnings. The backend copies source models before editing them. It does not edit fixture files or the baseline. The perturbed run omits the scenario ID so an edited input cannot accidentally select curated fixture output; it uses the regular `run_audit` path and current optional NLI configuration. A fixture baseline or a baseline/perturbed execution-mode mismatch is marked not directly comparable. Verdicts remain observations, not proof of truth, memory leakage, or evidence independence.
 
 Request shape remains `{answer, sources, scenario_id?}`. Answer is 1–20,000 code points, source count 1–8, source text 1–30,000, title 1–160, and IDs match `[A-Za-z0-9_-]+` and are unique. Whitespace-only text is rejected. Invalid input returns HTTP 422.
 

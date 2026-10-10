@@ -26,3 +26,7 @@ The baseline uses local tokenization, BM25-style lexical evidence ranking and sc
 - [RAGTruth](https://arxiv.org/abs/2401.00396) provides human-annotated RAG hallucination examples.
 
 These works informed the product framing only; Refutella does not reproduce their models or benchmarks. Evaluation here consists of controlled project-authored cases, not benchmark claims.
+
+## Phase 3 evidence stress evaluation
+
+Reproducible API examples are encoded in `tests/test_stress.py`: removing the only supporting source while retaining an irrelevant source yielded SUPPORTED → INSUFFICIENT_EVIDENCE; removing an unrelated source left the observed verdict SUPPORTED; replacing an exact supporting sentence with a paraphrase yielded INSUFFICIENT_EVIDENCE under the lexical baseline. These examples exercise the existing rules and retrieval path; they are not representative samples, accuracy measurements, or evidence that every perturbation should change a verdict. Evidence sensitivity is not a test of parametric memory leakage. A fixture baseline is curated and therefore reported as not directly comparable with the engine's perturbed result.
