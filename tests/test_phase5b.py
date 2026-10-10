@@ -75,3 +75,22 @@ def test_known_month_week_nli_conflict_cannot_create_contradicted_verdict():
     ]), verifier=MisclassifyingVerifier())
     assert result.claims[0].verdict.value != "CONTRADICTED"
     assert result.claims[0].verification_tier.value == "MODEL_FLAG"
+
+
+def test_localization_returns_exact_unicode_date_quantity_and_polarity_spans():
+    cases = [
+        ("The café trial counted 84 plants.", "The café trial counted 48 plants.", "84", "48", "QUANTITY_OR_DURATION_MISMATCH"),
+        ("The café trial ended on March 4, 2024.", "The café trial ended on March 5, 2024.", "March 4, 2024", "March 5, 2024", "DATE_MISMATCH"),
+        ("The office is open on Monday.", "The office is closed on Monday.", "open", "closed", "POLARITY_MISMATCH"),
+    ]
+    for answer, source_text, answer_token, source_token, rule_id in cases:
+        result = run_audit(AuditRequest(answer=answer, sources=[{"source_id": "s", "title": "Note", "text": source_text}]))
+        localization = result.claims[0].error_localizations[0]
+        assert localization.rule_id == rule_id
+        assert answer[localization.claim_start_offset:localization.claim_end_offset] == answer_token
+        assert source_text[localization.source_start_offset:localization.source_end_offset] == source_token
+
+    ambiguous = run_audit(AuditRequest(answer="The trial counted 84 plants and 12 trees.", sources=[
+        {"source_id": "s", "title": "Note", "text": "The trial counted 48 plants and 18 trees."},
+    ]))
+    assert ambiguous.claims[0].error_localizations == []

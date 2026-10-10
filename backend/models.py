@@ -107,6 +107,18 @@ class ReviewFlag(BaseModel):
     caveat_sentences: list[str] = []
     limitations: str
 
+class ErrorLocalization(BaseModel):
+    rule_id: str
+    explanation: str
+    claim_start_offset: int
+    claim_end_offset: int
+    claim_text: str
+    source_id: str
+    sentence_id: str
+    source_start_offset: int
+    source_end_offset: int
+    source_text: str
+
 class DeterministicCheck(BaseModel):
     check_type: str
     status: Literal["MATCH", "MISMATCH", "NOT_CHECKED"]
@@ -143,6 +155,7 @@ class ClaimFinding(BaseModel):
     severity: Literal["LOW", "MEDIUM", "HIGH"] | None = None
     search_receipt: SearchReceipt | None = None
     review_flags: list[ReviewFlag] = []
+    error_localizations: list[ErrorLocalization] = []
 
 class AuditSummary(BaseModel):
     supported: int = Field(ge=0)

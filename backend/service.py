@@ -202,6 +202,61 @@ def _check(claim, passage):
     if not checks: checks.append(DeterministicCheck(check_type="numeric_date_polarity", status="NOT_CHECKED", detail="No safely comparable discrepancy rule applied."))
     return None, checks, ""
 
+def _localize_mismatch(claim, passage, claim_start, ref):
+    """Return exact token pairs only when a narrow rule identifies one pair."""
+    number_spans = lambda text: [match for match in NUMBER.finditer(text)
+        if not any(date.start() <= match.start() and match.end() <= date.end() for date in _DATE_PATTERN.finditer(text))]
+    left = right = None
+    rule_id = ""
+    explanation = ""
+    dates_left, dates_right = list(_DATE_PATTERN.finditer(claim)), list(_DATE_PATTERN.finditer(passage))
+    if len(dates_left) == len(dates_right) == 1 and _date_values(claim) != _date_values(passage):
+        left, right, rule_id = dates_left[0], dates_right[0], "DATE_MISMATCH"
+        explanation = "These uniquely identified date spans differ under the deterministic date rule."
+    elif len(number_spans(claim)) == len(number_spans(passage)) == 1 and _values(claim) != _values(passage):
+        left, right, rule_id = number_spans(claim)[0], number_spans(passage)[0], "QUANTITY_OR_DURATION_MISMATCH"
+        explanation = "These uniquely identified quantity or duration spans differ under the deterministic comparison rule."
+    else:
+        negation = re.compile(r"\b(?:not|no|never|neither|cannot|can't|without|doesn't|isn't|aren't|won't)\b", re.I)
+        left_neg, right_neg = list(negation.finditer(claim)), list(negation.finditer(passage))
+        if len(left_neg) <= 1 and len(right_neg) <= 1 and len(left_neg) != len(right_neg):
+            negative, positive = (right_neg[0], claim) if right_neg else (left_neg[0], passage)
+            positive_tokens = list(TOKEN.finditer(positive))
+            next_token = next((token for token in positive_tokens if token.start() >= negative.end()), None)
+            counterpart_text = next_token.group(0) if next_token else ""
+            counterpart = list(re.finditer(rf"\b{re.escape(counterpart_text)}\b", claim if right_neg else passage, re.I)) if counterpart_text else []
+            if len(counterpart) == 1:
+                if right_neg:
+                    left = counterpart[0]
+                    right = _LocatedSpan(negative.start(), next_token.end(), passage[negative.start():next_token.end()])
+                else:
+                    right = counterpart[0]
+                    left = _LocatedSpan(negative.start(), next_token.end(), claim[negative.start():next_token.end()])
+                rule_id = "POLARITY_MISMATCH"
+                explanation = "The deterministic polarity rule identified a single negation and its matching predicate."
+        if left is None and right is None:
+            left_tokens, right_tokens = list(TOKEN.finditer(claim)), list(TOKEN.finditer(passage))
+            differences = [(a, b) for a, b in zip(left_tokens, right_tokens) if a.group(0).casefold() != b.group(0).casefold()]
+            antonyms = ({"open", "closed"}, {"available", "unavailable"}, {"enabled", "disabled"}, {"present", "absent"})
+            if len(left_tokens) == len(right_tokens) and len(differences) == 1 and {differences[0][0].group(0).casefold(), differences[0][1].group(0).casefold()} in antonyms:
+                left, right = differences[0]
+                rule_id = "POLARITY_MISMATCH"
+                explanation = "The deterministic polarity rule identified one explicit antonym pair."
+    if left is None or right is None:
+        return None
+    left_start, left_end = claim_start + left.start(), claim_start + left.end()
+    right_start, right_end = ref.start_offset + right.start(), ref.start_offset + right.end()
+    return ErrorLocalization(rule_id=rule_id, explanation=explanation, claim_start_offset=left_start,
+        claim_end_offset=left_end, claim_text=left.group(0), source_id=ref.source_id,
+        sentence_id=ref.sentence_id, source_start_offset=right_start, source_end_offset=right_end,
+        source_text=right.group(0))
+
+class _LocatedSpan:
+    def __init__(self, start, end, text): self._start, self._end, self._text = start, end, text
+    def start(self): return self._start
+    def end(self): return self._end
+    def group(self, *args): return self._text
+
 _AUTO_VERIFIER = object()
 
 @lru_cache(maxsize=2)
@@ -251,12 +306,15 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
             matched_terms=matched, reason_code=reason, duplicate_of=duplicate_of))
         refs.append(EvidenceReference(source_id=source_id, sentence_id=s.sentence_id, quote=s.text,
             start_offset=s.start_offset, end_offset=s.end_offset, quotation_validated=True))
-    checks=[]; conflict=False; supported=False; contradiction=None
+    checks=[]; conflict=False; supported=False; contradiction=None; error_localizations=[]
     model_entailments=[]; model_contradictions=[]; model_unknown=[]; model_failures=[]; semantic=[]
     for ref in refs:
         passage = next(s.text for s in sentences if s.sentence_id == ref.sentence_id)
         verdict, checkset, _ = _check(claim.text, passage); checks.extend(checkset)
-        if verdict == "CONTRADICTED": contradiction = ref
+        if verdict == "CONTRADICTED":
+            contradiction = ref
+            localized = _localize_mismatch(claim.text, passage, claim.start_offset, ref)
+            if localized: error_localizations.append(localized)
         if not any(ch in set('"“”‘’') for ch in passage) and _normal(claim.text) == _normal(passage):
             supported = True
         if verifier is not None:
@@ -342,7 +400,8 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
         semantic_verifications=semantic, note=note, model_score=None, model_score_calibrated=None,
         search_receipt=SearchReceipt(query_terms=list(dict.fromkeys(_tokens(claim.text))), status=receipt_status,
             candidates=receipt_candidates, reason_code=receipt_reason),
-        review_flags=review_claim(finding_id, claim.text, flag_candidates))
+        review_flags=review_claim(finding_id, claim.text, flag_candidates),
+        error_localizations=error_localizations)
 
 def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
     data = _fixture(request.scenario_id) if request.scenario_id else None
