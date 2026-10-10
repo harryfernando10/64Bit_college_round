@@ -1,11 +1,14 @@
 """Source-driven, deterministic evidence discovery and conservative checks."""
 import json
+import os
 import re
+from functools import lru_cache
 from decimal import Decimal, InvalidOperation
 from collections import Counter
 from pathlib import Path
 from uuid import uuid4
 from backend.models import *
+from backend.verifier import NliResult, load_local_verifier
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "data" / "scenarios"
@@ -149,7 +152,18 @@ def _check(claim, passage):
     if not checks: checks.append(DeterministicCheck(check_type="numeric_date_polarity", status="NOT_CHECKED", detail="No safely comparable discrepancy rule applied."))
     return None, checks, ""
 
-def _audit_claim(i, claim, sentences, request):
+_AUTO_VERIFIER = object()
+
+@lru_cache(maxsize=2)
+def _configured_verifier(path: str):
+    return load_local_verifier(path)
+
+def configured_verifier():
+    """Opt in only through an explicit local directory; unset means baseline mode."""
+    path = os.getenv("REFUTELLA_NLI_MODEL_PATH", "").strip()
+    return _configured_verifier(path) if path else None
+
+def _audit_claim(i, claim, sentences, request, verifier=None):
     ranked = _rank(claim.text, sentences)
     # Candidate threshold is intentionally permissive for evidence discovery, never verdict selection.
     eligible = [(score, s) for score, s in ranked if score >= 0.5]
@@ -172,12 +186,28 @@ def _audit_claim(i, claim, sentences, request):
         refs.append(EvidenceReference(source_id=source_id, sentence_id=s.sentence_id, quote=s.text,
             start_offset=s.start_offset, end_offset=s.end_offset, quotation_validated=True))
     checks=[]; conflict=False; supported=False; contradiction=None
+    model_entailments=[]; model_contradictions=[]; model_unknown=[]; model_failures=[]; semantic=[]
     for ref in refs:
         passage = next(s.text for s in sentences if s.sentence_id == ref.sentence_id)
         verdict, checkset, _ = _check(claim.text, passage); checks.extend(checkset)
         if verdict == "CONTRADICTED": contradiction = ref
         if not any(ch in set('"“”‘’') for ch in passage) and _normal(claim.text) == _normal(passage):
             supported = True
+        if verifier is not None:
+            if any(ch in set('"“”‘’') for ch in passage):
+                result = NliResult("INCONCLUSIVE", verifier.model_id, detail="Quoted passage skipped because attribution is unresolved.")
+            else:
+                try:
+                    result = verifier.verify(passage, claim.text)
+                except Exception as exc:
+                    result = NliResult("ERROR", verifier.model_id, detail=f"Inference failed: {type(exc).__name__}: {exc}")
+            semantic.append(SemanticVerification(status=result.label, source_id=ref.source_id,
+                sentence_id=ref.sentence_id, model_id=result.model_id, raw_logits=result.raw_logits,
+                detail=result.detail))
+            if result.label == "ENTAILMENT": model_entailments.append(ref)
+            elif result.label == "CONTRADICTION": model_contradictions.append(ref)
+            elif result.label in {"NEUTRAL", "INCONCLUSIVE", "UNAVAILABLE", "ERROR"}: model_unknown.append(result)
+            if result.label in {"INCONCLUSIVE", "UNAVAILABLE", "ERROR"}: model_failures.append(result)
         # Only a direct causal-qualification phrase signals this narrow ambiguity;
         # unrelated negation elsewhere in the sentence is not enough.
         claim_causal = re.search(r"\b(?:cause|causes|caused|causation)\b", claim.text, re.I)
@@ -188,33 +218,158 @@ def _audit_claim(i, claim, sentences, request):
         if claim_causal and source_withholds_causation and not any(ch in set('"“”‘’') for ch in passage):
             conflict = True
     conflicting_sources = bool(contradiction and supported)
-    if conflict or conflicting_sources:
-        verdict, tier = Verdict.AMBIGUOUS, VerificationTier.MECHANICAL
-        note = "Retrieved supplied passages materially conflict about this claim; the baseline cannot resolve the disagreement." if conflicting_sources else "The source distinguishes an observed association from established causation, so the claim wording admits materially different readings."
+    model_conflict = bool(model_entailments and model_contradictions)
+    mechanical_model_conflict = bool((contradiction and model_entailments) or (model_contradictions and supported))
+    exact_nli_conflict = bool(supported and model_unknown)
+    partial_nli_conflict = bool(model_failures and (model_entailments or model_contradictions))
+    if conflict or conflicting_sources or model_conflict or mechanical_model_conflict or exact_nli_conflict or partial_nli_conflict:
+        verdict = Verdict.AMBIGUOUS
+        tier = VerificationTier.MODEL if model_entailments or model_contradictions or model_unknown else VerificationTier.MECHANICAL
+        if conflict:
+            note = "The source explicitly withholds a causal conclusion; this baseline cannot resolve the claim's causal interpretation."
+        else:
+            note = "Retrieved passages or independent checks disagree about this claim; the audit remains ambiguous."
     elif contradiction:
         verdict, tier = Verdict.CONTRADICTED, VerificationTier.MECHANICAL
         _, _, note = _check(claim.text, next(s.text for s in sentences if s.sentence_id == contradiction.sentence_id))
-    elif supported:
+        if model_unknown:
+            note += " NLI verification was unavailable or inconclusive; this verdict relies on the deterministic check only."
+    elif model_contradictions:
+        verdict, tier = Verdict.CONTRADICTED, VerificationTier.MODEL
+        note = "The local NLI verifier judged retrieved evidence contradictory to the claim; its output is uncalibrated and fallible."
+    elif model_entailments:
+        verdict, tier = Verdict.SUPPORTED, VerificationTier.MODEL
+        note = "The local NLI verifier judged retrieved evidence to entail the claim; its output is uncalibrated and fallible."
+    elif supported and not model_unknown:
         verdict, tier, note = Verdict.SUPPORTED, VerificationTier.MECHANICAL, "A supplied passage states the same normalized claim text. This narrow textual match does not establish source authority or world truth."
     else:
         verdict, tier = Verdict.INSUFFICIENT_EVIDENCE, VerificationTier.INSUFFICIENT
-        note = "Relevant passages were retrieved but no implemented rule established support or contradiction." if refs else "No relevant passage met the retrieval threshold; the supplied sources do not establish this claim."
+        note = "NLI verification was unavailable, failed, or inconclusive; no independent deterministic rule established a verdict." if model_unknown else "Relevant passages were retrieved but no implemented rule established support or contradiction." if refs else "No relevant passage met the retrieval threshold; the supplied sources do not establish this claim."
     return ClaimFinding(claim_id=f"claim-{i+1}", claim_text=claim.text, start_offset=claim.start_offset, end_offset=claim.end_offset,
         verdict=verdict, verification_tier=tier, evidence=refs, deterministic_checks=checks,
-        note=note, model_score=None, model_score_calibrated=None)
+        semantic_verifications=semantic, note=note, model_score=None, model_score_calibrated=None)
 
-def run_audit(request: AuditRequest) -> AuditResponse:
+def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
     data = _fixture(request.scenario_id) if request.scenario_id else None
     if data and data["answer"] == request.answer and data["sources"] == [s.model_dump() for s in request.sources]:
         claims = [ClaimFinding(**c) for c in data["claims"]]
         mode, warnings = ExecutionMode.FIXTURE, ["Curated fixture findings; no model was used."]
     else:
+        if verifier is _AUTO_VERIFIER:
+            verifier = configured_verifier()
         sentence_map = {s.source_id: split_sentences(s.text, s.source_id) for s in request.sources}
         all_sentences = [sent for group in sentence_map.values() for sent in group]
-        claims = [_audit_claim(i, s, all_sentences, request) for i, s in enumerate(split_sentences(request.answer, "claim"))]
-        mode = ExecutionMode.BASELINE
-        warnings = ["Evidence-based baseline: local lexical retrieval plus narrow deterministic rules; no model was used.", "Lexical relevance is not truth verification. Support requires a normalized textual match; contradiction requires a scoped value/date/polarity rule."]
+        claims = [_audit_claim(i, s, all_sentences, request, verifier if verifier is not None and verifier.available else None) for i, s in enumerate(split_sentences(request.answer, "claim"))]
+        if verifier is None:
+            mode = ExecutionMode.BASELINE
+            warnings = ["Evidence-based baseline: local lexical retrieval plus narrow deterministic rules; no model was used.", "Lexical relevance is not truth verification. Support requires a normalized textual match; contradiction requires a scoped value/date/polarity rule."]
+        elif not verifier.available:
+            mode = ExecutionMode.MODEL_UNAVAILABLE
+            # Return explicit per-passage unavailable states without silently invoking another verifier.
+            for finding in claims:
+                finding.semantic_verifications = [SemanticVerification(status="UNAVAILABLE", source_id=ref.source_id,
+                    sentence_id=ref.sentence_id, model_id=verifier.model_id, detail=verifier.detail) for ref in finding.evidence]
+                if finding.verdict in {Verdict.SUPPORTED, Verdict.CONTRADICTED} and finding.verification_tier == VerificationTier.MODEL:
+                    finding.verdict = Verdict.INSUFFICIENT_EVIDENCE
+                    finding.verification_tier = VerificationTier.INSUFFICIENT
+                    finding.note = "Optional NLI is unavailable; no semantic verdict was substituted."
+            warnings = [f"Optional local NLI ({verifier.model_id}) is unavailable: {verifier.detail}", "No NLI verdict was substituted. Deterministic baseline checks remain independent and limited."]
+        else:
+            mode = ExecutionMode.MODEL
+            warnings = [f"Model-assisted verification used local NLI model {verifier.model_id}.", "NLI logits and class-margin decisions are fallible and uncalibrated; lexical retrieval only selects passages and never establishes support."]
     if mode == ExecutionMode.FIXTURE:
         sentence_map = {s.source_id: split_sentences(s.text, s.source_id) for s in request.sources}
     counts = {v: sum(c.verdict == v for c in claims) for v in Verdict}
     return AuditResponse(audit_id=f"audit-{uuid4().hex[:12]}", execution_mode=mode, answer=request.answer, sources=request.sources, source_sentences=sentence_map, claims=claims, summary=AuditSummary(supported=counts[Verdict.SUPPORTED], contradicted=counts[Verdict.CONTRADICTED], insufficient_evidence=counts[Verdict.INSUFFICIENT_EVIDENCE], ambiguous=counts[Verdict.AMBIGUOUS], total_claims=len(claims)), warnings=warnings)
+
+def run_stress_experiment(experiment: StressExperimentRequest) -> StressExperimentResponse:
+    """Rerun the regular engine over immutable, request-local source copies."""
+    baseline = experiment.baseline
+    sources = [source.model_copy(deep=True) for source in baseline.sources]
+    source = next((item for item in sources if item.source_id == experiment.source_id), None)
+    if source is None:
+        raise ValueError(f"Unknown source_id: {experiment.source_id}")
+
+    sentence = None
+    if experiment.operation != "REMOVE_SOURCE":
+        sentence = next((item for item in baseline.source_sentences[source.source_id]
+                         if item.sentence_id == experiment.sentence_id), None)
+        if sentence is None:
+            raise ValueError(f"Unknown sentence_id {experiment.sentence_id!r} for source {source.source_id}")
+        if not any(ref.source_id == source.source_id and ref.sentence_id == sentence.sentence_id
+                   for claim in baseline.claims for ref in claim.evidence):
+            raise ValueError("The selected sentence is not a retrieved evidence passage in the baseline")
+
+    changed_text = ""
+    label = ""
+    if experiment.operation == "REMOVE_SOURCE":
+        sources = [item for item in sources if item.source_id != source.source_id]
+        changed_text = source.text
+        label = f"Removed source {source.source_id} — {source.title}"
+    elif experiment.operation == "REMOVE_PASSAGE":
+        changed_text = sentence.text
+        source.text = source.text[:sentence.start_offset] + source.text[sentence.end_offset:]
+        if not source.text.strip():
+            sources = [item for item in sources if item.source_id != source.source_id]
+        label = f"Removed passage {sentence.sentence_id} from {source.source_id}"
+    else:
+        changed_text = experiment.replacement_text or ""
+        if changed_text == sentence.text:
+            raise ValueError("Replacement text is unchanged from the selected passage")
+        source.text = source.text[:sentence.start_offset] + changed_text + source.text[sentence.end_offset:]
+        label = f"Edited passage {sentence.sentence_id} in {source.source_id}"
+
+    if not sources:
+        comparison = [StressClaimComparison(claim_id=c.claim_id, claim_text=c.claim_text,
+            baseline=c, perturbed=None, outcome="NOT_COMPARABLE",
+            explanation="No source context remains, so the audit engine cannot run with its required non-empty source set.",
+            baseline_execution_mode=baseline.execution_mode, perturbed_execution_mode=None)
+            for c in baseline.claims]
+        warnings = ["The experiment removed the entire source context; no perturbed audit was run."]
+        if baseline.execution_mode == ExecutionMode.FIXTURE:
+            warnings.append("The baseline used curated fixture findings; the empty-context experiment cannot be directly compared with them.")
+        return StressExperimentResponse(experiment_label=label, changed_source_id=source.source_id,
+            changed_sentence_id=experiment.sentence_id, changed_text=changed_text, baseline=baseline,
+            perturbed=None, comparisons=comparison, comparable=False,
+            warnings=warnings)
+
+    try:
+        request = AuditRequest(answer=baseline.answer, sources=sources, scenario_id=None)
+        perturbed = run_audit(request)
+    except Exception as exc:
+        if isinstance(exc, (ValueError,)):
+            raise
+        raise ValueError(f"The experiment could not be audited: {exc}") from exc
+    by_id = {claim.claim_id: claim for claim in perturbed.claims}
+    comparisons = []
+    modes_comparable = baseline.execution_mode == perturbed.execution_mode and baseline.execution_mode != ExecutionMode.FIXTURE
+    for original in baseline.claims:
+        updated = by_id.get(original.claim_id)
+        if not modes_comparable:
+            outcome = "NOT_COMPARABLE"
+            explanation = ("The baseline is a curated fixture and the perturbed result comes from the audit engine; verdict differences are not directly comparable."
+                           if baseline.execution_mode == ExecutionMode.FIXTURE else
+                           f"Execution modes differ ({baseline.execution_mode.value} vs {perturbed.execution_mode.value}); verdict differences are not directly comparable.")
+        elif updated is None:
+            outcome = "NOT_COMPARABLE"
+            explanation = "The perturbed audit returned no corresponding claim."
+        elif updated.verdict != original.verdict:
+            outcome = "UNRESOLVED" if updated.verdict == Verdict.INSUFFICIENT_EVIDENCE else "CHANGED"
+            explanation = f"The verdict changed from {original.verdict.value} to {updated.verdict.value} in the returned audit."
+        else:
+            outcome = "UNCHANGED"
+            explanation = f"Both audits returned {original.verdict.value}; this result alone does not indicate evidence independence or model memory leakage."
+        comparisons.append(StressClaimComparison(claim_id=original.claim_id, claim_text=original.claim_text,
+            baseline=original, perturbed=updated, outcome=outcome, explanation=explanation,
+            baseline_execution_mode=baseline.execution_mode,
+            perturbed_execution_mode=perturbed.execution_mode if updated is not None else None))
+    warnings = [f"Baseline ({baseline.execution_mode.value}): {warning}" for warning in baseline.warnings]
+    warnings.extend(f"Perturbed ({perturbed.execution_mode.value}): {warning}" for warning in perturbed.warnings)
+    if baseline.execution_mode == ExecutionMode.FIXTURE:
+        warnings.append("The baseline used curated fixture findings; the perturbed audit uses the live engine, so mode differences limit direct comparability.")
+    if baseline.execution_mode != perturbed.execution_mode:
+        warnings.append(f"Execution modes differ ({baseline.execution_mode.value} baseline, {perturbed.execution_mode.value} perturbed).")
+    return StressExperimentResponse(experiment_label=label, changed_source_id=source.source_id,
+        changed_sentence_id=experiment.sentence_id, changed_text=changed_text, baseline=baseline,
+        perturbed=perturbed, comparisons=comparisons, comparable=modes_comparable,
+        warnings=warnings)

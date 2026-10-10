@@ -21,6 +21,7 @@ class ExecutionMode(StrEnum):
     BASELINE = "BASELINE"
     LIVE = "LIVE"
     MODEL = "MODEL"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
 
 class SourceDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -74,6 +75,14 @@ class DeterministicCheck(BaseModel):
     status: Literal["MATCH", "MISMATCH", "NOT_CHECKED"]
     detail: str
 
+class SemanticVerification(BaseModel):
+    status: Literal["ENTAILMENT", "CONTRADICTION", "NEUTRAL", "INCONCLUSIVE", "UNAVAILABLE", "ERROR"]
+    source_id: str
+    sentence_id: str
+    model_id: str
+    raw_logits: dict[str, float] | None = None
+    detail: str = ""
+
 class LexicalDifference(BaseModel):
     answer_terms: list[str] = []
     source_terms: list[str] = []
@@ -87,6 +96,7 @@ class ClaimFinding(BaseModel):
     verification_tier: VerificationTier
     evidence: list[EvidenceReference] = []
     deterministic_checks: list[DeterministicCheck] = []
+    semantic_verifications: list[SemanticVerification] = []
     lexical_difference: LexicalDifference | None = None
     note: str
     model_score: float | None = Field(default=None, ge=0, le=1)
@@ -160,3 +170,47 @@ class AuditResponse(BaseModel):
                 if not (sentence.start_offset <= ref.start_offset < ref.end_offset <= sentence.end_offset):
                     raise ValueError("evidence offsets must be within referenced sentence")
         return self
+
+class StressExperimentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    baseline: AuditResponse
+    operation: Literal["REMOVE_SOURCE", "REMOVE_PASSAGE", "EDIT_PASSAGE"]
+    source_id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    sentence_id: str | None = Field(default=None, max_length=100)
+    replacement_text: str | None = Field(default=None, max_length=MAX_SOURCE)
+
+    @model_validator(mode="after")
+    def validate_operation(self):
+        if self.operation == "REMOVE_SOURCE":
+            if self.sentence_id is not None or self.replacement_text is not None:
+                raise ValueError("source removal does not accept a passage or replacement text")
+        else:
+            if not self.sentence_id:
+                raise ValueError("a sentence_id is required for passage experiments")
+            if self.operation == "EDIT_PASSAGE":
+                if self.replacement_text is None or not self.replacement_text.strip():
+                    raise ValueError("replacement_text must contain non-whitespace text")
+            elif self.replacement_text is not None:
+                raise ValueError("passage removal does not accept replacement text")
+        return self
+
+class StressClaimComparison(BaseModel):
+    claim_id: str
+    claim_text: str
+    baseline: ClaimFinding
+    perturbed: ClaimFinding | None
+    outcome: Literal["CHANGED", "UNCHANGED", "UNRESOLVED", "NOT_COMPARABLE"]
+    explanation: str
+    baseline_execution_mode: ExecutionMode
+    perturbed_execution_mode: ExecutionMode | None
+
+class StressExperimentResponse(BaseModel):
+    experiment_label: str
+    changed_source_id: str
+    changed_sentence_id: str | None
+    changed_text: str
+    baseline: AuditResponse
+    perturbed: AuditResponse | None
+    comparisons: list[StressClaimComparison]
+    comparable: bool
+    warnings: list[str] = []

@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 from fastapi.testclient import TestClient
 from backend.main import app
+from backend.models import AuditRequest
+from backend.service import run_audit
+from backend.verifier import NliResult, UnavailableVerifier, MODEL_IDENTIFIER
 client = TestClient(app)
 ROOT = Path(__file__).resolve().parents[1]
 def test_health():
@@ -169,3 +172,100 @@ def test_unrelated_dates_and_incompatible_units_are_not_compared():
   data=client.post('/api/audit',json={'answer':answer,'sources':[{'source_id':'s','title':'Source','text':source_text}]}).json()
   assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
   assert not any(x['status']=='MISMATCH' and x['check_type'] in {'date','quantity_or_unit'} for x in data['claims'][0]['deterministic_checks'])
+
+class MockVerifier:
+ available=True
+ model_id='test/mock-nli'
+ detail='mocked inference'
+ def __init__(self, labels): self.labels=labels; self.calls=[]
+ def verify(self,premise,hypothesis):
+  self.calls.append((premise,hypothesis))
+  label=self.labels.get(premise,'NEUTRAL')
+  return NliResult(label,self.model_id,{'contradiction':0.1,'entailment':0.8,'neutral':0.1},'mock raw logits')
+
+def _model_audit(answer,sources,verifier):
+ return run_audit(AuditRequest(answer=answer,sources=sources),verifier=verifier)
+
+def test_mock_nli_entails_paraphrased_retrieved_passage():
+ passage='The experiment continued for four weeks.'
+ verifier=MockVerifier({passage:'ENTAILMENT'})
+ result=_model_audit('The trial lasted four weeks.',[{'source_id':'s','title':'Report','text':passage}],verifier)
+ claim=result.claims[0]
+ assert result.execution_mode=='MODEL' and claim.verdict.value=='SUPPORTED'
+ assert verifier.calls==[(passage,'The trial lasted four weeks.')]
+ assert claim.semantic_verifications[0].status=='ENTAILMENT'
+ assert claim.semantic_verifications[0].raw_logits['entailment']==0.8
+ assert claim.model_score is None and claim.model_score_calibrated is None
+
+def test_mock_nli_contradiction_and_neutral_are_distinct():
+ passage='The office is closed on Monday.'
+ contra=MockVerifier({passage:'CONTRADICTION'})
+ result=_model_audit('The office is staffed on Monday.',[{'source_id':'s','title':'Note','text':passage}],contra)
+ assert result.claims[0].verdict.value=='CONTRADICTED'
+ neutral=MockVerifier({passage:'NEUTRAL'})
+ result=_model_audit('The office will be staffed on Monday.',[{'source_id':'s','title':'Note','text':passage}],neutral)
+ assert result.claims[0].verdict.value=='INSUFFICIENT_EVIDENCE'
+ assert result.claims[0].semantic_verifications[0].status=='NEUTRAL'
+
+def test_model_is_not_run_on_irrelevant_unretrieved_passage():
+ verifier=MockVerifier({})
+ result=_model_audit('Cats are common household pets.',[{'source_id':'s','title':'Travel note','text':'The Eiffel Tower is located in Paris.'}],verifier)
+ assert result.claims[0].verdict.value=='INSUFFICIENT_EVIDENCE'
+ assert result.claims[0].evidence==[]
+ assert verifier.calls==[]
+
+def test_model_entailment_cannot_override_deterministic_number_or_date_mismatch():
+ cases=[
+  ('Researchers counted 84 plants in the trial.','Researchers counted 48 plants in the trial.'),
+  ('The review was completed in 2025.','The review was completed in 2024.'),
+ ]
+ for answer,passage in cases:
+  verifier=MockVerifier({passage:'ENTAILMENT'})
+  result=_model_audit(answer,[{'source_id':'s','title':'Report','text':passage}],verifier)
+  assert result.claims[0].verdict.value=='AMBIGUOUS'
+
+def test_model_conflicting_sources_are_ambiguous_and_all_passages_are_checked():
+ positive='The room is open on Monday.'
+ negative='The room is not open on Monday.'
+ verifier=MockVerifier({positive:'ENTAILMENT',negative:'CONTRADICTION'})
+ result=_model_audit(positive,[{'source_id':'a','title':'A','text':positive},{'source_id':'b','title':'B','text':negative}],verifier)
+ assert result.claims[0].verdict.value=='AMBIGUOUS'
+ assert {pair[0] for pair in verifier.calls}=={positive,negative}
+
+def test_unavailable_or_failed_model_is_explicit_and_does_not_fake_nli():
+ passage='The experiment continued for four weeks.'
+ source=[{'source_id':'s','title':'Report','text':passage}]
+ result=_model_audit('The trial lasted four weeks.',source,UnavailableVerifier(MODEL_IDENTIFIER,'weights absent'))
+ assert result.execution_mode=='MODEL_UNAVAILABLE'
+ assert result.claims[0].verdict.value=='INSUFFICIENT_EVIDENCE'
+ assert result.claims[0].semantic_verifications[0].status=='UNAVAILABLE'
+ class BrokenVerifier(MockVerifier):
+  def verify(self,premise,hypothesis): raise RuntimeError('test inference error')
+ result=_model_audit('The trial lasted four weeks.',source,BrokenVerifier({}))
+ assert result.execution_mode=='MODEL'
+ assert result.claims[0].verdict.value=='INSUFFICIENT_EVIDENCE'
+ assert result.claims[0].semantic_verifications[0].status=='ERROR'
+
+def test_missing_optional_model_packages_do_not_break_baseline(tmp_path):
+ from backend.service import configured_verifier
+ from backend.verifier import load_local_verifier
+ assert configured_verifier() is None
+ missing=load_local_verifier('Z:/definitely-not-a-refutella-model')
+ assert not missing.available
+ assert missing.verify('premise','claim').label=='UNAVAILABLE'
+ local=tmp_path/'empty-model-dir'; local.mkdir()
+ assert not load_local_verifier(str(local)).available
+
+def test_mock_nli_handles_explicit_negation_pair():
+ premise='The room is not open on Monday.'
+ verifier=MockVerifier({premise:'CONTRADICTION'})
+ result=_model_audit('The room is open on Monday.',[{'source_id':'s','title':'Notice','text':premise}],verifier)
+ assert result.claims[0].verdict.value=='CONTRADICTED'
+ assert result.claims[0].semantic_verifications[0].status=='CONTRADICTION'
+
+def test_api_reports_configured_missing_model_without_network_or_fallback(monkeypatch,tmp_path):
+ monkeypatch.setenv('REFUTELLA_NLI_MODEL_PATH',str(tmp_path/'missing-weights'))
+ data=client.post('/api/audit',json={'answer':'The trial lasted four weeks.','sources':[{'source_id':'s','title':'Source','text':'The experiment continued for a month.'}]}).json()
+ assert data['execution_mode']=='MODEL_UNAVAILABLE'
+ assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
+ assert 'unavailable' in data['warnings'][0].lower()
