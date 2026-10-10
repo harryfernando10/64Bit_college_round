@@ -114,6 +114,23 @@ def _polarity_terms(text):
     normalized = re.sub(r"\b(?:isn't|aren't|wasn't|weren't|doesn't|don't|didn't|can't|cannot|won't)\b", " not ", text, flags=re.I)
     return _tokens(normalized)
 
+def _triage_reason(text):
+    """Narrow, auditable rules for obvious non-assertions; uncertain text stays in scope."""
+    stripped = text.strip()
+    if stripped.endswith("?"):
+        return "Question detected; no factual assertion was evaluated."
+    words = _tokens(stripped)
+    heading = re.sub(r"[^\w\s]", "", stripped.casefold()).strip()
+    if heading in {"overview", "summary", "introduction", "background", "conclusion", "in conclusion", "in summary", "however", "therefore", "for example", "note", "next steps", "key takeaways"}:
+        return "Heading or transition label detected; not assessed as a factual claim."
+    if words and words[0] in {"please", "consider", "imagine", "remember", "note", "see", "refer", "look", "let", "use", "add", "remove", "choose", "select", "click", "open", "close", "enter", "run", "avoid", "keep", "do", "make", "check", "visit", "try"}:
+        return "Instruction or command pattern detected; not assessed as a factual claim."
+    if len(words) <= 5 and not re.search(r"[.!?]$", stripped):
+        return "Short heading or label pattern detected; not assessed as a factual claim."
+    if re.match(r"^(?:I think|I believe|I feel|in my opinion|we think|we believe)\b", stripped, re.I):
+        return "Explicit opinion wording detected; not assessed as a factual claim."
+    return None
+
 def _check(claim, passage):
     checks = []
     if any(ch in set('"“”‘’') for ch in passage):
@@ -163,7 +180,12 @@ def configured_verifier():
     path = os.getenv("REFUTELLA_NLI_MODEL_PATH", "").strip()
     return _configured_verifier(path) if path else None
 
-def _audit_claim(i, claim, sentences, request, verifier=None):
+def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=False):
+    triage = _triage_reason(claim.text)
+    if triage and not assess_flagged:
+        return ClaimFinding(claim_id=f"claim-{i+1}", claim_text=claim.text, start_offset=claim.start_offset,
+            end_offset=claim.end_offset, verdict=Verdict.NOT_ASSESSED, verification_tier=VerificationTier.INSUFFICIENT,
+            note=triage, triage_reason=triage, plain_summary=triage)
     ranked = _rank(claim.text, sentences)
     # Candidate threshold is intentionally permissive for evidence discovery, never verdict selection.
     eligible = [(score, s) for score, s in ranked if score >= 0.5]
@@ -245,7 +267,16 @@ def _audit_claim(i, claim, sentences, request, verifier=None):
     else:
         verdict, tier = Verdict.INSUFFICIENT_EVIDENCE, VerificationTier.INSUFFICIENT
         note = "NLI verification was unavailable, failed, or inconclusive; no independent deterministic rule established a verdict." if model_unknown else "Relevant passages were retrieved but no implemented rule established support or contradiction." if refs else "No relevant passage met the retrieval threshold; the supplied sources do not establish this claim."
+    plain_summary = (f"The source says “{next(s.text for s in sentences if s.sentence_id == contradiction.sentence_id)},” while the answer says “{claim.text}.”" if contradiction else
+        "The source contains the same normalized wording as the answer; this is a text match, not proof of truth." if verdict == Verdict.SUPPORTED and tier == VerificationTier.MECHANICAL else
+        "The local NLI model judged a retrieved passage to entail the claim; its output is fallible and uncalibrated." if verdict == Verdict.SUPPORTED else
+        "The local NLI model judged a retrieved passage to contradict the claim; its output is fallible and uncalibrated." if verdict == Verdict.CONTRADICTED and not contradiction else
+        "Retrieved passages or checks disagree, so the available evidence does not settle this claim." if verdict == Verdict.AMBIGUOUS else
+        "Relevant passages were found, but no implemented check established support or contradiction." if refs else
+        "No relevant passage was retrieved from the supplied sources." if verdict == Verdict.INSUFFICIENT_EVIDENCE else
+        f"The supplied evidence was assessed as {verdict.value.replace('_', ' ').lower()}." if not triage else f"Included for assessment by request. {triage}")
     return ClaimFinding(claim_id=f"claim-{i+1}", claim_text=claim.text, start_offset=claim.start_offset, end_offset=claim.end_offset,
+        triage_reason=triage, plain_summary=plain_summary,
         verdict=verdict, verification_tier=tier, evidence=refs, deterministic_checks=checks,
         semantic_verifications=semantic, note=note, model_score=None, model_score_calibrated=None)
 
@@ -259,7 +290,9 @@ def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
             verifier = configured_verifier()
         sentence_map = {s.source_id: split_sentences(s.text, s.source_id) for s in request.sources}
         all_sentences = [sent for group in sentence_map.values() for sent in group]
-        claims = [_audit_claim(i, s, all_sentences, request, verifier if verifier is not None and verifier.available else None) for i, s in enumerate(split_sentences(request.answer, "claim"))]
+        claim_spans = split_sentences(request.answer, "claim")
+        claims = [_audit_claim(i, s, all_sentences, request, verifier if verifier is not None and verifier.available else None,
+                    f"claim-{i+1}" in request.assess_claim_ids) for i, s in enumerate(claim_spans)]
         if verifier is None:
             mode = ExecutionMode.BASELINE
             warnings = ["Evidence-based baseline: local lexical retrieval plus narrow deterministic rules; no model was used.", "Lexical relevance is not truth verification. Support requires a normalized textual match; contradiction requires a scoped value/date/polarity rule."]
@@ -280,7 +313,8 @@ def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
     if mode == ExecutionMode.FIXTURE:
         sentence_map = {s.source_id: split_sentences(s.text, s.source_id) for s in request.sources}
     counts = {v: sum(c.verdict == v for c in claims) for v in Verdict}
-    return AuditResponse(audit_id=f"audit-{uuid4().hex[:12]}", execution_mode=mode, answer=request.answer, sources=request.sources, source_sentences=sentence_map, claims=claims, summary=AuditSummary(supported=counts[Verdict.SUPPORTED], contradicted=counts[Verdict.CONTRADICTED], insufficient_evidence=counts[Verdict.INSUFFICIENT_EVIDENCE], ambiguous=counts[Verdict.AMBIGUOUS], total_claims=len(claims)), warnings=warnings)
+    labels = {source.source_id: f"S{i+1}" for i, source in enumerate(request.sources)}
+    return AuditResponse(audit_id=f"audit-{uuid4().hex[:12]}", execution_mode=mode, answer=request.answer, sources=request.sources, source_sentences=sentence_map, source_labels=labels, claims=claims, summary=AuditSummary(supported=counts[Verdict.SUPPORTED], contradicted=counts[Verdict.CONTRADICTED], insufficient_evidence=counts[Verdict.INSUFFICIENT_EVIDENCE], ambiguous=counts[Verdict.AMBIGUOUS], not_assessed=counts[Verdict.NOT_ASSESSED], total_claims=len(claims)), warnings=warnings)
 
 def run_stress_experiment(experiment: StressExperimentRequest) -> StressExperimentResponse:
     """Rerun the regular engine over immutable, request-local source copies."""

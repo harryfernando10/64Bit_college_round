@@ -83,9 +83,9 @@ test('all scenarios load canonical fixture inputs and consistent claim totals', 
     const totals = await page.locator('.summary-stats .stat strong').allTextContents();
     expect(totals.reduce((sum, value) => sum + Number(value), 0)).toBe(claimCount);
     const expectedTotals: Record<string, string[]> = {
-      'Harbor field study': ['1', '1', '1', '0'],
-      'Library notice': ['1', '1', '1', '0'],
-      'Garden trial summary': ['1', '0', '0', '1'],
+      'Harbor field study': ['1', '1', '1', '0', '0'],
+      'Library notice': ['1', '1', '1', '0', '0'],
+      'Garden trial summary': ['1', '0', '0', '1', '0'],
     };
     expect(totals).toEqual(expectedTotals[scenario]);
     await claims.last().click();
@@ -423,4 +423,15 @@ test('real API validation returns 422 details and the UI reports transport failu
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Custom input review' })).toBeVisible();
+});
+
+test('claim triage is visible, overridable, and source labels are readable', async ({ page }) => {
+  await page.getByLabel('Sample scenario').selectOption({ label: 'Garden trial summary' });
+  await page.getByLabel('Answer under review').fill('What color was the garden?');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  await expect(page.locator('.claim-row')).toContainText('Not assessed');
+  await expect(page.locator('.triage-reason')).toContainText('Question detected; no factual assertion was evaluated.');
+  await expect(page.getByText('S1', { exact: true }).first()).toBeVisible();
+  await page.getByText('Include in audit').click();
+  await expect(page.locator('.claim-row')).not.toContainText('Not assessed');
 });

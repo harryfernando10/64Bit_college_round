@@ -10,6 +10,7 @@ class Verdict(StrEnum):
     CONTRADICTED = "CONTRADICTED"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
     AMBIGUOUS = "AMBIGUOUS"
+    NOT_ASSESSED = "NOT_ASSESSED"
 
 class VerificationTier(StrEnum):
     MECHANICAL = "MECHANICAL"
@@ -41,6 +42,7 @@ class AuditRequest(BaseModel):
     answer: str = Field(min_length=1, max_length=MAX_ANSWER)
     sources: list[SourceDocument] = Field(min_length=1, max_length=8)
     scenario_id: str | None = Field(default=None, max_length=80)
+    assess_claim_ids: list[str] = Field(default_factory=list, max_length=100)
 
     @field_validator("answer")
     @classmethod
@@ -90,6 +92,8 @@ class LexicalDifference(BaseModel):
 class ClaimFinding(BaseModel):
     claim_id: str
     claim_text: str
+    triage_reason: str | None = None
+    plain_summary: str = ""
     start_offset: int = Field(ge=0)
     end_offset: int = Field(ge=1)
     verdict: Verdict
@@ -108,6 +112,7 @@ class AuditSummary(BaseModel):
     contradicted: int = Field(ge=0)
     insufficient_evidence: int = Field(ge=0)
     ambiguous: int = Field(ge=0)
+    not_assessed: int = Field(default=0, ge=0)
     total_claims: int = Field(ge=0)
 
 class AuditResponse(BaseModel):
@@ -116,6 +121,7 @@ class AuditResponse(BaseModel):
     answer: str
     sources: list[SourceDocument]
     source_sentences: dict[str, list[SentenceReference]]
+    source_labels: dict[str, str] = {}
     claims: list[ClaimFinding]
     summary: AuditSummary
     warnings: list[str] = []
@@ -128,6 +134,7 @@ class AuditResponse(BaseModel):
             "contradicted": counts[Verdict.CONTRADICTED],
             "insufficient_evidence": counts[Verdict.INSUFFICIENT_EVIDENCE],
             "ambiguous": counts[Verdict.AMBIGUOUS],
+            "not_assessed": counts[Verdict.NOT_ASSESSED],
             "total_claims": len(self.claims),
         }
         if self.summary.model_dump() != expected:
@@ -135,6 +142,8 @@ class AuditResponse(BaseModel):
         source_ids = {source.source_id for source in self.sources}
         if set(self.source_sentences) != source_ids:
             raise ValueError("source_sentences keys must match source IDs")
+        if self.source_labels and (set(self.source_labels) != source_ids or set(self.source_labels.values()) != {f"S{i+1}" for i in range(len(source_ids))}):
+            raise ValueError("source_labels must uniquely label sources in current order")
         for source in self.sources:
             seen_sentence_ids = set()
             for sentence in self.source_sentences[source.source_id]:
