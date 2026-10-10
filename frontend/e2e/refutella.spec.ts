@@ -435,3 +435,20 @@ test('claim triage is visible, overridable, and source labels are readable', asy
   await page.getByText('Include in audit').click();
   await expect(page.locator('.claim-row')).not.toContainText('Not assessed');
 });
+
+test('evidence matrix switches claims and receipt can select exact source offsets', async ({ page }) => {
+  await page.getByLabel('Answer under review').fill('The café opened in 2024.');
+  await page.getByLabel(/^Source text /).first().fill('The café opened in 2023.');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  await expect(page.getByRole('heading', { name: 'Evidence matrix' })).toBeVisible();
+  await expect(page.getByText('Search Receipt · RETRIEVED')).toBeVisible();
+  await page.getByText('Search Receipt · RETRIEVED').click();
+  await expect(page.getByText('CONTRADICTION_RULE')).toBeVisible();
+  await page.screenshot({ path: '../docs/qa-screenshots/phase5b-search-receipt-matrix-1440.png', fullPage: true });
+  const show = page.getByRole('button', { name: 'Show in source' }).first();
+  await show.click();
+  const source = page.getByLabel(/^Source text /).first();
+  const selection = await source.evaluate((element: HTMLTextAreaElement) => element.value.slice(element.selectionStart, element.selectionEnd));
+  expect(selection).toBe('The café opened in 2023.');
+  await expect(page.getByRole('region', { name: 'Claim and source evidence matrix' })).toBeVisible();
+});

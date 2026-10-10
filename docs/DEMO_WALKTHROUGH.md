@@ -50,3 +50,6 @@ This is a live baseline example, separate from the curated scenario selector and
 Run a custom audit, then use Evidence Stress Lab to remove either source. Removing the primary report leaves the second source in context, so the comparison remains meaningful and does not immediately become an empty-context case. The exact-text support result is a narrow text match, not source-authority or world-truth verification.
 
 Question, command, heading and explicit opinion patterns appear as **Not assessed** with an explanation. Select **Include in audit** to run normal claim checks on that span. `S1`, `S2` labels follow current source order; API IDs remain available for traceability.
+# Phase 5B review
+
+After running an audit, inspect the claim/source evidence matrix and select a source cell to change the active claim. The selected claim's Search Receipt lists its retrieved passages and offsets. Review flags appear separately and never change verdicts. Duplicate-source labels identify similar supplied text while keeping each source visible.
