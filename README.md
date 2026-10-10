@@ -6,9 +6,9 @@ Refutella is an evidence-first audit workspace for inspecting AI-generated claim
 
 Intended users include readers, researchers, students, and reviewers. The long-term product includes claim verification, validated source references, precise localisation, narrow deterministic checks, reasoning consistency, uncertainty-aware reporting, safety flags, audit history/export, a labelled evaluation set, and the Evidence Stress Lab for controlled evidence edits. These are future goals, not current capabilities or novelty claims.
 
-## Phase 1
+## Phase 2
 
-React/TypeScript/Vite/Tailwind frontend; Python/FastAPI/Pydantic backend; version-controlled JSON fixtures; API-loaded scenario picker; fixture audit endpoint; validated character spans; useful errors and fixture labels. All findings rendered by the UI come from the API. Exact quotation validation proves a quotation is present at those offsets, not that the claim is true. Unmatched custom input is returned as insufficient evidence, without a live assessment.
+React/TypeScript/Vite/Tailwind frontend; Python/FastAPI/Pydantic backend; version-controlled JSON fixtures; API-loaded scenario picker; validated character spans; useful errors and fixture labels. Exact unchanged fixture inputs retain their curated results. Other inputs use a local evidence-based baseline: sentence-span claims, BM25-style lexical passage retrieval and narrow number/date/polarity checks. Support requires normalized whole-claim textual identity; lexical similarity alone never supports a claim. No model or external network is used. Quote validation proves presence at offsets, not truth.
 
 ## Structure
 
@@ -57,7 +57,7 @@ The scenario selector loads fixtures through GET /api/scenarios. Select a scenar
 
 ## Limitations
 
-Fixtures are curated demonstrations, not evaluated inference. No general verifier, semantic retrieval, local model, reasoning/safety evaluation, history, export or source-edit experiment exists yet. Sentence splitting is simple and may mishandle abbreviations and decimals. Offsets use Python Unicode code-point indexes. HHEM research and gating are in docs/RESEARCH_NOTES.md.
+The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. No local model, history, export or source-edit experiment is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
 
 ## Team workflow and Git checkpoint
 

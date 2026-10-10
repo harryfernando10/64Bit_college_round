@@ -18,6 +18,7 @@ class VerificationTier(StrEnum):
 
 class ExecutionMode(StrEnum):
     FIXTURE = "FIXTURE"
+    BASELINE = "BASELINE"
     LIVE = "LIVE"
     MODEL = "MODEL"
 
@@ -154,6 +155,8 @@ class AuditResponse(BaseModel):
                     raise ValueError("evidence offsets are outside source text")
                 if source.text[ref.start_offset:ref.end_offset] != ref.quote:
                     raise ValueError("evidence quote offsets do not match source text")
+                if not ref.quotation_validated:
+                    raise ValueError("quotation_validated must be true for returned evidence")
                 if not (sentence.start_offset <= ref.start_offset < ref.end_offset <= sentence.end_offset):
                     raise ValueError("evidence offsets must be within referenced sentence")
         return self

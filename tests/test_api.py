@@ -24,15 +24,15 @@ def test_whitespace_only_answer_and_source_are_rejected():
  assert client.post('/api/audit',json={'answer':'Claim.','sources':[{'source_id':'s1','title':'   ','text':'Text'}]}).status_code==422
  assert client.post('/api/audit',json={'answer':'Claim.','sources':[{'source_id':'s1','title':'Source','text':'   '}]}).status_code==422
 
-def test_modified_fixture_input_is_insufficient_and_echoes_all_sources():
+def test_modified_fixture_input_uses_baseline_and_echoes_all_sources():
  s=client.get('/api/scenarios').json()[0]
  sources=[*s['sources'],{'source_id':'extra-source','title':'Additional source','text':'A separate note.'}]
  response=client.post('/api/audit',json={'answer':s['answer']+' Edited.','sources':sources,'scenario_id':s['scenario_id']})
  assert response.status_code==200
  data=response.json()
  assert data['sources']==sources
- assert all(c['verdict']=='INSUFFICIENT_EVIDENCE' for c in data['claims'])
- assert data['summary']['insufficient_evidence']==len(data['claims'])
+ assert data['execution_mode']=='BASELINE'
+ assert len(data['claims'])>=1
  assert data['summary']['total_claims']==len(data['claims'])
 
 def test_duplicate_source_ids_are_rejected():
@@ -77,3 +77,95 @@ def test_invalid_quote_is_rejected_even_when_source_id_exists():
  payload=client.post('/api/audit',json={'answer':s['answer'],'sources':s['sources'],'scenario_id':s['scenario_id']}).json()
  payload['claims'][0]['evidence'][0]['quote']='not the source quote'
  with pytest.raises(ValueError,match='evidence quote offsets'): AuditResponse.model_validate(payload)
+
+def test_source_driven_baseline_supported_contradicted_and_missing():
+ source={'source_id':'note','title':'Note','text':'The garden trial ended after four weeks. Researchers counted 48 plants in the trial.'}
+ answer='The garden trial ended after four weeks. Researchers counted 84 plants in the trial. The report lists the plant color.'
+ data=client.post('/api/audit',json={'answer':answer,'sources':[source]}).json()
+ assert data['execution_mode']=='BASELINE'
+ assert [c['verdict'] for c in data['claims']]==['SUPPORTED','CONTRADICTED','INSUFFICIENT_EVIDENCE']
+ for c in data['claims']:
+  assert answer[c['start_offset']:c['end_offset']]==c['claim_text']
+  for ref in c['evidence']:
+   assert source['text'][ref['start_offset']:ref['end_offset']]==ref['quote']
+ assert data['summary']['total_claims']==3
+ expected_counts={'SUPPORTED':'supported','CONTRADICTED':'contradicted','INSUFFICIENT_EVIDENCE':'insufficient_evidence','AMBIGUOUS':'ambiguous'}
+ for verdict,key in expected_counts.items():
+  assert data['summary'][key]==sum(c['verdict']==verdict for c in data['claims'])
+
+def test_baseline_unicode_multisource_and_negation():
+ sources=[{'source_id':'first','title':'First','text':'🌿 The room is not open on Friday.'}, {'source_id':'second','title':'Second','text':'The room opens on Saturday.'}]
+ data=client.post('/api/audit',json={'answer':'🌿 The room is open on Friday.','sources':sources}).json()
+ claim=data['claims'][0]
+ assert data['execution_mode']=='BASELINE' and claim['verdict']=='CONTRADICTED'
+ assert claim['start_offset']==0 and claim['claim_text']==data['answer']
+ assert claim['evidence'][0]['source_id']=='first'
+ assert any(x['check_type']=='polarity' and x['status']=='MISMATCH' for x in claim['deterministic_checks'])
+
+def test_baseline_conflicting_sources_are_ambiguous():
+ sources=[{'source_id':'a','title':'A','text':'The room is open on Monday.'},{'source_id':'b','title':'B','text':'The room is not open on Monday.'}]
+ data=client.post('/api/audit',json={'answer':'The room is open on Monday.','sources':sources}).json()
+ assert data['claims'][0]['verdict']=='AMBIGUOUS'
+
+def test_baseline_wrong_year_and_decimal_segmentation():
+ from backend.service import split_sentences
+ assert [s.text for s in split_sentences('The value is 3.14 cm. It was measured in 2024.','x')]==['The value is 3.14 cm.','It was measured in 2024.']
+ source={'source_id':'s','title':'Report','text':'The review was completed in 2024.'}
+ data=client.post('/api/audit',json={'answer':'The review was completed in 2025.','sources':[source]}).json()
+ assert data['claims'][0]['verdict']=='CONTRADICTED'
+ assert any(c['check_type']=='date' and c['status']=='MISMATCH' for c in data['claims'][0]['deterministic_checks'])
+
+def test_unrelated_quantities_in_same_passage_do_not_create_contradiction():
+ source={'source_id':'s','title':'Report','text':'The study enrolled 14 volunteers and assigned 12 tablets to staff.'}
+ data=client.post('/api/audit',json={'answer':'The study enrolled 12 volunteers.','sources':[source]}).json()
+ assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
+ assert not any(c['check_type']=='quantity_or_unit' and c['status']=='MISMATCH' for c in data['claims'][0]['deterministic_checks'])
+
+def test_unrelated_single_quantities_with_shared_generic_words_do_not_compare():
+ source={'source_id':'s','title':'Report','text':'The report recorded 14 items today.'}
+ data=client.post('/api/audit',json={'answer':'The report recorded 12 items last year.','sources':[source]}).json()
+ assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
+ assert not any(c['check_type']=='quantity_or_unit' and c['status']=='MISMATCH' for c in data['claims'][0]['deterministic_checks'])
+
+def test_negation_scope_and_quotes_do_not_create_false_contradictions():
+ answer='The room is open on Monday.'
+ cases=[
+  ('The room is open on Monday; parking is not available.', 'INSUFFICIENT_EVIDENCE'),
+  ('"The room is not open on Monday," said a visitor.', 'INSUFFICIENT_EVIDENCE'),
+  ('"The room is open on Monday."', 'INSUFFICIENT_EVIDENCE'),
+  ('The room is not open on Monday.', 'CONTRADICTED'),
+ ]
+ for text, expected in cases:
+  data=client.post('/api/audit',json={'answer':answer,'sources':[{'source_id':'s','title':'Notice','text':text}]}).json()
+  assert data['claims'][0]['verdict']==expected
+
+def test_paraphrased_or_irrelevant_evidence_does_not_prove_claim():
+ cases=[
+  ('The trial lasted four weeks.', 'The experiment continued for a month.'),
+  ('The report describes tea imports.', 'A river bridge opened after repairs.'),
+ ]
+ for answer, source_text in cases:
+  data=client.post('/api/audit',json={'answer':answer,'sources':[{'source_id':'s','title':'Source','text':source_text}]}).json()
+  assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
+  if data['claims'][0]['evidence']:
+   assert data['claims'][0]['note'].startswith('Relevant passages were retrieved')
+
+def test_low_rank_conflict_in_another_document_is_considered():
+ sources=[
+  {'source_id':'primary','title':'Primary','text':'The room is open on Monday. The room is open on Monday morning.'},
+  {'source_id':'conflict','title':'Conflict','text':'The room is not open on Monday.'},
+ ]
+ data=client.post('/api/audit',json={'answer':'The room is open on Monday.','sources':sources}).json()
+ claim=data['claims'][0]
+ assert claim['verdict']=='AMBIGUOUS'
+ assert {e['source_id'] for e in claim['evidence']}=={'primary','conflict'}
+
+def test_unrelated_dates_and_incompatible_units_are_not_compared():
+ cases=[
+  ('The meeting was on 2024.', 'The meeting was on 2025 and the report was filed in 2024.'),
+  ('The pipe is 3 cm wide.', 'The pipe is 0.03 m wide.'),
+ ]
+ for answer, source_text in cases:
+  data=client.post('/api/audit',json={'answer':answer,'sources':[{'source_id':'s','title':'Source','text':source_text}]}).json()
+  assert data['claims'][0]['verdict']=='INSUFFICIENT_EVIDENCE'
+  assert not any(x['status']=='MISMATCH' and x['check_type'] in {'date','quantity_or_unit'} for x in data['claims'][0]['deterministic_checks'])

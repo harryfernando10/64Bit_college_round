@@ -1,17 +1,9 @@
-# Test Plan
+# Test Plan and Controlled Evaluation
 
-## Automated checks
-- Backend unit/schema: request bounds, unique IDs, response counts and exact span integrity.
-- API integration: health, scenario listing, successful fixture audit and understandable 422 response.
-- Evidence: exact quote equals source slice; source/sentence IDs exist; quote stays inside sentence; answer span equals claim text.
-- Fixtures: expected labels and evidence sentence IDs agree; every scenario parses through API model.
-- Frontend: npm run build performs TypeScript checking and production bundling.
+`python -m pytest` runs API, schema, curated fixture and deterministic baseline cases offline. The controlled examples in `tests/test_api.py` cover supported exact text, quantity/date mismatch and unrelated-value abstentions, scoped and quoted polarity, paraphrased support, irrelevant evidence, missing detail, conflicting sources, Unicode offsets, multi-document retrieval, quote integrity, duplicate IDs and modified fixtures. They are constructed test cases, not a representative benchmark of real-world hallucinations.
 
-## Manual and end-to-end acceptance
-Start API and Vite, load default scenario, confirm data arrives from GET /api/scenarios, submit via POST /api/audit, inspect selected claim/evidence and fixture label. Change input and confirm insufficient fallback and warning. Stop API and confirm visible error and retry. Keyboard tab through selector, text areas and buttons; check narrow viewport.
+Evaluation status: controlled suite measures contract behavior and includes all four verdict paths (fourth via conflicting sources and the curated fixture set). It is too small and intentionally rule-aligned to report meaningful per-verdict precision, recall, F1, confusion matrix or macro-F1; those metrics are therefore excluded rather than presented as general performance. Count is the number of passing automated tests at execution time, reported in the delivery summary. No cases are claimed as a benchmark.
 
-## Edge cases
-Empty answer/source, duplicate or malformed IDs, unknown fixture, stale scenario ID with edited text, multi-line source offsets, Unicode before a span, punctuation/abbreviations/decimals, compound claims, source not proving claim, quote that exists but is irrelevant, contradictory passages, overlapping claims, invalid evidence IDs, oversized inputs, API unavailable.
+The frontend production build runs `npm run build` and performs TypeScript checks. Manual browser checks: load each scenario; edit an answer and confirm old results clear; run a custom audit; verify exact spans and source quotes; add a source; restore the selected scenario; inspect baseline/fixture disclosures; submit invalid empty material; stop backend and confirm API error state.
 
-## Passing vs assumptions
-Tests only establish implemented schema and fixture behavior. They do not establish factuality, verifier accuracy, claim segmentation quality, accessibility audit completion, or model compatibility on team hardware. Phase 1 has no automated browser E2E test. Record actual commands and results in docs/Context.md.
+Known edge cases include abbreviations, decimal/punctuation segmentation, paraphrase verification, tables or structured source text, and ambiguous numeric context. Quote validity does not imply entailment. No frontend browser automation is configured.

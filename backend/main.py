@@ -5,12 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.models import AuditRequest, AuditResponse
 from backend.service import run_audit, SCENARIOS
 
-app = FastAPI(title="Refutella API", version="0.1.0", description="Fixture-backed evidence audit foundation")
+app = FastAPI(title="Refutella API", version="0.2.0", description="Evidence-based claim auditing against supplied sources")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "refutella-api", "phase": 1}
+    return {"status": "ok", "service": "refutella-api", "phase": 2}
 
 @app.get("/api/scenarios")
 def scenarios():
