@@ -1,0 +1,98 @@
+{
+  "scenario_id": "library-hours",
+  "title": "Library notice",
+  "description": "Negation and date contradiction with a carefully limited conclusion.",
+  "answer": "The library is open on Monday, 4 August 2025. It reopens Tuesday, 5 August 2025, at 09:00. It will also be open every public holiday.",
+  "sources": [
+    {
+      "source_id": "library-notice",
+      "title": "Community library notice",
+      "text": "The community library is closed on Monday, 4 August 2025. It will reopen on Tuesday, 5 August 2025, at 09:00. The notice does not list holiday hours."
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim-1",
+      "claim_text": "The library is open on Monday, 4 August 2025.",
+      "start_offset": 0,
+      "end_offset": 45,
+      "verdict": "CONTRADICTED",
+      "verification_tier": "MECHANICAL",
+      "evidence": [
+        {
+          "source_id": "library-notice",
+          "sentence_id": "library-notice-s1",
+          "quote": "The community library is closed on Monday, 4 August 2025.",
+          "start_offset": 0,
+          "end_offset": 57,
+          "quotation_validated": true
+        }
+      ],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The notice explicitly says the library is closed that day.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    },
+    {
+      "claim_id": "claim-2",
+      "claim_text": "It reopens Tuesday, 5 August 2025, at 09:00.",
+      "start_offset": 46,
+      "end_offset": 90,
+      "verdict": "SUPPORTED",
+      "verification_tier": "MECHANICAL",
+      "evidence": [
+        {
+          "source_id": "library-notice",
+          "sentence_id": "library-notice-s2",
+          "quote": "It will reopen on Tuesday, 5 August 2025, at 09:00.",
+          "start_offset": 58,
+          "end_offset": 109,
+          "quotation_validated": true
+        }
+      ],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The notice gives this reopening date and time.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    },
+    {
+      "claim_id": "claim-3",
+      "claim_text": "It will also be open every public holiday.",
+      "start_offset": 91,
+      "end_offset": 133,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "verification_tier": "INSUFFICIENT",
+      "evidence": [],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The notice does not specify holiday hours.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    }
+  ],
+  "expected_claims": [
+    {
+      "claim_id": "claim-1",
+      "verdict": "CONTRADICTED",
+      "evidence_sentence_id": "library-notice-s1",
+      "rationale": "The notice explicitly says the library is closed that day."
+    },
+    {
+      "claim_id": "claim-2",
+      "verdict": "SUPPORTED",
+      "evidence_sentence_id": "library-notice-s2",
+      "rationale": "The notice gives this reopening date and time."
+    },
+    {
+      "claim_id": "claim-3",
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "evidence_sentence_id": null,
+      "rationale": "The notice does not specify holiday hours."
+    }
+  ]
+}

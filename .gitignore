@@ -1,0 +1,24 @@
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+.env.*
+!.env.example
+models/
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.pth
+dist/
+coverage/
+.DS_Store
+
+# Local Windows-generated files
+/%SystemDrive%/
+desktop.ini
+
+# Accidental Windows system-path artifacts
+/frontend/%SystemDrive%/

@@ -1,0 +1,98 @@
+{
+  "scenario_id": "harbor-plan",
+  "title": "Harbor field study",
+  "description": "Supported, number mismatch, and missing-detail claims.",
+  "answer": "The study began on 12 June 2025. Researchers surveyed 84 volunteers at three harbor sites. The survey asked about recycling habits.",
+  "sources": [
+    {
+      "source_id": "study-note",
+      "title": "Harbor study note",
+      "text": "The field study began on 12 June 2025. Researchers surveyed 48 volunteers across three harbor sites. The note does not describe the survey questions."
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim-1",
+      "claim_text": "The study began on 12 June 2025.",
+      "start_offset": 0,
+      "end_offset": 32,
+      "verdict": "SUPPORTED",
+      "verification_tier": "MECHANICAL",
+      "evidence": [
+        {
+          "source_id": "study-note",
+          "sentence_id": "study-note-s1",
+          "quote": "The field study began on 12 June 2025.",
+          "start_offset": 0,
+          "end_offset": 38,
+          "quotation_validated": true
+        }
+      ],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The source states this date directly.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    },
+    {
+      "claim_id": "claim-2",
+      "claim_text": "Researchers surveyed 84 volunteers at three harbor sites.",
+      "start_offset": 33,
+      "end_offset": 90,
+      "verdict": "CONTRADICTED",
+      "verification_tier": "MECHANICAL",
+      "evidence": [
+        {
+          "source_id": "study-note",
+          "sentence_id": "study-note-s2",
+          "quote": "Researchers surveyed 48 volunteers across three harbor sites.",
+          "start_offset": 39,
+          "end_offset": 100,
+          "quotation_validated": true
+        }
+      ],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The source reports 48 volunteers, not 84.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    },
+    {
+      "claim_id": "claim-3",
+      "claim_text": "The survey asked about recycling habits.",
+      "start_offset": 91,
+      "end_offset": 131,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "verification_tier": "INSUFFICIENT",
+      "evidence": [],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The supplied note does not describe the survey questions.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    }
+  ],
+  "expected_claims": [
+    {
+      "claim_id": "claim-1",
+      "verdict": "SUPPORTED",
+      "evidence_sentence_id": "study-note-s1",
+      "rationale": "The source states this date directly."
+    },
+    {
+      "claim_id": "claim-2",
+      "verdict": "CONTRADICTED",
+      "evidence_sentence_id": "study-note-s2",
+      "rationale": "The source reports 48 volunteers, not 84."
+    },
+    {
+      "claim_id": "claim-3",
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "evidence_sentence_id": null,
+      "rationale": "The supplied note does not describe the survey questions."
+    }
+  ]
+}

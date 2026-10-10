@@ -1,0 +1,77 @@
+{
+  "scenario_id": "garden-trial",
+  "title": "Garden trial summary",
+  "description": "An ambiguous change over time and one supported observation.",
+  "answer": "After four weeks, compost plots had a median height of 18 cm. Compost may have caused taller plants, although this small trial does not establish causation.",
+  "sources": [
+    {
+      "source_id": "garden-report",
+      "title": "Garden trial report",
+      "text": "In a small garden trial, plots receiving compost had a median height of 18 cm after four weeks. The comparison plots had a median height of 15 cm at the same time. The report does not state whether compost caused the difference."
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim-1",
+      "claim_text": "After four weeks, compost plots had a median height of 18 cm.",
+      "start_offset": 0,
+      "end_offset": 61,
+      "verdict": "SUPPORTED",
+      "verification_tier": "MECHANICAL",
+      "evidence": [
+        {
+          "source_id": "garden-report",
+          "sentence_id": "garden-report-s1",
+          "quote": "plots receiving compost had a median height of 18 cm after four weeks.",
+          "start_offset": 25,
+          "end_offset": 95,
+          "quotation_validated": true
+        }
+      ],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "This matches the reported median and time point.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    },
+    {
+      "claim_id": "claim-2",
+      "claim_text": "Compost may have caused taller plants, although this small trial does not establish causation.",
+      "start_offset": 62,
+      "end_offset": 156,
+      "verdict": "AMBIGUOUS",
+      "verification_tier": "MECHANICAL",
+      "evidence": [
+        {
+          "source_id": "garden-report",
+          "sentence_id": "garden-report-s3",
+          "quote": "The report does not state whether compost caused the difference.",
+          "start_offset": 164,
+          "end_offset": 228,
+          "quotation_validated": true
+        }
+      ],
+      "deterministic_checks": [],
+      "lexical_difference": null,
+      "note": "The observation is compatible with a causal hypothesis, but the source explicitly says causation is not established.",
+      "model_score": null,
+      "model_score_calibrated": null,
+      "severity": null
+    }
+  ],
+  "expected_claims": [
+    {
+      "claim_id": "claim-1",
+      "verdict": "SUPPORTED",
+      "evidence_sentence_id": "garden-report-s1",
+      "rationale": "This matches the reported median and time point."
+    },
+    {
+      "claim_id": "claim-2",
+      "verdict": "AMBIGUOUS",
+      "evidence_sentence_id": "garden-report-s3",
+      "rationale": "The observation is compatible with a causal hypothesis, but the source explicitly says causation is not established."
+    }
+  ]
+}
