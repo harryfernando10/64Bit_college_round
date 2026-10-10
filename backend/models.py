@@ -21,6 +21,7 @@ class ExecutionMode(StrEnum):
     BASELINE = "BASELINE"
     LIVE = "LIVE"
     MODEL = "MODEL"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
 
 class SourceDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -74,6 +75,14 @@ class DeterministicCheck(BaseModel):
     status: Literal["MATCH", "MISMATCH", "NOT_CHECKED"]
     detail: str
 
+class SemanticVerification(BaseModel):
+    status: Literal["ENTAILMENT", "CONTRADICTION", "NEUTRAL", "INCONCLUSIVE", "UNAVAILABLE", "ERROR"]
+    source_id: str
+    sentence_id: str
+    model_id: str
+    raw_logits: dict[str, float] | None = None
+    detail: str = ""
+
 class LexicalDifference(BaseModel):
     answer_terms: list[str] = []
     source_terms: list[str] = []
@@ -87,6 +96,7 @@ class ClaimFinding(BaseModel):
     verification_tier: VerificationTier
     evidence: list[EvidenceReference] = []
     deterministic_checks: list[DeterministicCheck] = []
+    semantic_verifications: list[SemanticVerification] = []
     lexical_difference: LexicalDifference | None = None
     note: str
     model_score: float | None = Field(default=None, ge=0, le=1)

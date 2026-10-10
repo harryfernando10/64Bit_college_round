@@ -1,0 +1,5 @@
+# Optional only; the standard application requirements do not include ML packages.
+torch>=2.2,<3
+transformers>=4.57.1,<5
+sentencepiece>=0.2,<1
+safetensors>=0.4,<1
