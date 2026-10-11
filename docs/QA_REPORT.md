@@ -258,3 +258,13 @@ The model-card verification at the pinned revision is documented in `docs/RESEAR
 # Phase 5B verification
 
 Phase 5B verification on 2026-10-11: backend suite **60 passed, 1 skipped**; curated evaluation **12/12** plus **3 stress cases**; Playwright **15/15**; TypeScript/production build passed; `git diff --check` passed; opt-in real local NLI smoke **1 passed** with the available pinned weights. Pytest reported the existing AnyIO deprecation and Windows temporary-directory cleanup `PermissionError` after test completion. Browser E2E included screenshot capture and matrix/receipt selection at Unicode source offsets. Duration checks cover fixed week/day conversion and abstention on month/week comparisons, including the observed NLI conflict case. Localization tests verify exact Unicode quantity, date and antonym spans and abstention on multi-value ambiguity. Root `QA_REPORT.md` and untracked root `RESEARCH_NOTES.md` are pre-existing user work and were preserved unchanged.
+
+## Phase 5C implementation verification (2026-10-11)
+
+- Full backend suite: **69 passed, 1 skipped**. One existing AnyIO deprecation warning; Windows pytest temporary-directory cleanup emitted a post-success `PermissionError` during atexit.
+- Evaluation: **12/12** project-authored labels and **3/3** controlled stress cases passed. These remain project regression cases, not a held-out reliability study.
+- Playwright: **17 passed**, including the Phase 5C mutation/receipt/repair-refusal/re-run flow and the network-isolation workflow. That workflow covered browser startup/navigation, a PDF upload and a real audit against local services; it observed **0 blocked external attempts and 0 successful external requests**. This describes only the exercised workflow.
+- Frontend TypeScript/production build passed. The standalone local NLI smoke test ran against the present ignored checkpoint and passed **1 test**; NLI remains optional and no general accuracy claim follows.
+- Focused backend tests cover canonical NFC/LF hashes, mutation immutability, duplicate warnings, empty held-out pending state, Wilson arithmetic/suppression and repair positive/negative approval cases.
+- Independently authored held-out cases: **none supplied**. Blind-spot mutation-stratified reliability counts/intervals are not populated. Repair refusal coverage is focused, not the full requested ambiguity/date-format matrix. No broad screen-reader or keyboard audit was completed.
+- The root `QA_REPORT.md` and untracked root `RESEARCH_NOTES.md` remain preserved; generated browser screenshots were restored after test execution.

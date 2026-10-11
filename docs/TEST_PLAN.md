@@ -22,3 +22,7 @@ Phase 5A verification on 2026-10-10: full backend suite **53 passed** (the added
 # Phase 5B regression additions
 
 Backend coverage checks same-pass receipt snippets and Unicode offsets, exact and conservative near-duplicate detection with short/unrelated controls, model-only contradiction abstention, and retrieved-source review flags. Browser regression coverage verifies matrix selection, receipt display, and exact Unicode source selection; existing flows cover claim switching, source removal, and custom audits. The claims matrix and flags are navigation aids, not independent truth judgments.
+
+## Phase 5C focused checks
+
+`tests/test_phase5c.py` covers shared catalog IDs/classes, mutation endpoint immutability and true engine outputs, duplicate warnings, baseline paraphrase untestability, canonical NFC/LF JSON and hashes, small Wilson arithmetic, empty held-out reporting, receipt payload, repair dry-run and approval gating. The Playwright network test explicitly allows only `localhost:5173` and `127.0.0.1:8000`, blocks other origins, uploads the checked-in PDF fixture, and audits it. This covers startup/navigation/upload/audit in that browser workflow only. UI keyboard, small viewport overflow, broad repair refusal matrix, and mutation-stratified reliability remain manual/incomplete checks.

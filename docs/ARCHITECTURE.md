@@ -41,6 +41,14 @@ The lab compares actual outputs; unchanged verdicts do not demonstrate model mem
 The answer splitter retains every span. Narrow auditable heuristics flag obvious questions, command patterns, short unpunctuated headings/labels, and explicit first-person opinion phrases as `NOT_ASSESSED`. Flagged spans carry a human-readable reason and may be included by passing their stable-in-response claim IDs in `assess_claim_ids`. This does not use an LLM or network classifier, and uncertain wording stays in ordinary claim assessment. Response totals count all returned spans, with a separate `not_assessed` count.
 
 Source labels are request-order presentation labels (`S1`, `S2`, …); `source_id` remains the immutable identity used by evidence references, stress operations, and API traces. Removing or reordering sources recalculates labels from the current request order.
+
+## Phase 5C request-scoped services
+
+`backend/mutations.py` owns one deterministic catalog for evidence and claim transformations. `/api/mutation-run` snapshots source models, audits the original input, transforms a copy, and audits the copy through `run_audit`; it never edits persisted application state. Arbitrary claim replacements and text edits have no semantic ground truth. Duplicate passages are not independent corroboration. Fixture baselines cannot be compared directly with live mutations.
+
+`backend/phase5c.py` handles NFC/LF canonical receipt JSON, SHA-256 coverage, held-out JSON validation, Wilson interval arithmetic, and conservative repair previews. The evaluation directory is empty until independent cases are supplied. The current blind-spot endpoint therefore reports availability only and does not claim mutation-stratified reliability. Receipt hashes omit random audit IDs and timestamps but preserve meaningful source/claim/evidence ordering and offsets.
+
+Repair proposals depend on one existing deterministic mismatch localization. The backend performs an isolated dry-run; a proposal is exposed only when the resulting claim is `SUPPORTED` and carries evidence. Applying requires explicit approval and exactly one existing numeric/date token change; the client clears old findings and asks for a new audit.
 # Phase 5B additions
 
 The retrieval pass records its ranked candidates directly into each finding's Search Receipt; it is not rerun for display. Source duplicate detection is request-local, preserves every input, and labels conservative near matches without inferring independent provenance. `backend/review_flags.py` owns the maintained review cue rules. Flags annotate wording and never affect verdict selection. Model-only contradiction becomes `AMBIGUOUS` / `MODEL_FLAG`; only deterministic contradiction checks produce `CONTRADICTED`. Deterministic numeric, date, and narrow polarity mismatches expose source/claim offsets only when one exact token pair is identifiable. Fixed week/day durations normalize; month/week comparisons abstain.

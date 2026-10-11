@@ -274,3 +274,46 @@ class StressExperimentResponse(BaseModel):
     comparisons: list[StressClaimComparison]
     comparable: bool
     warnings: list[str] = []
+
+class MutationRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER)
+    sources: list[SourceDocument] = Field(min_length=1, max_length=8)
+    mutation_id: str = Field(min_length=1, max_length=80)
+    target_id: str | None = None
+    parameters: dict = Field(default_factory=dict)
+    scenario_id: str | None = None
+
+class MutationRunResponse(BaseModel):
+    mutation: dict
+    target_id: str
+    changed_text: str
+    original_text: str
+    perturbed_text: str
+    expected_outcome: str
+    comparison: str
+    explanation: str
+    applicable: bool
+    warnings: list[str]
+    baseline: AuditResponse
+    perturbed: AuditResponse | None
+
+class BlindSpotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    include_project: bool = True
+    include_heldout: bool = True
+
+class RepairRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER)
+    sources: list[SourceDocument] = Field(min_length=1, max_length=8)
+    claim_id: str
+
+class RepairApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER)
+    proposed_answer: str = Field(min_length=1, max_length=MAX_ANSWER)
+    approved: bool
+    preview_token: str = Field(min_length=32, max_length=128)
+    claim_id: str = Field(min_length=1, max_length=100)
+    sources: list[SourceDocument] = Field(min_length=1, max_length=8)

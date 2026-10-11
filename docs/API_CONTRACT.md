@@ -2,6 +2,15 @@
 
 Base path `/api`; UTF-8 JSON. Pydantic models in `backend/models.py` and TypeScript definitions in `frontend/src/types.ts` are canonical. Extra request properties are rejected.
 
+## Phase 5C endpoints
+
+- `GET /api/mutations`: shared catalog metadata, side, declared expectations, ground-truth-by-construction limits and preconditions.
+- `POST /api/mutation-run`: request includes `answer`, `sources`, `mutation_id`, `target_id`, and optional `parameters`; the response contains immutable baseline and perturbed engine results, actual text change, declared expectation, warnings and comparison status. Invalid/inapplicable transformations return HTTP 422. Fixture/live mode pairs are `NOT_COMPARABLE`.
+- `POST /api/blind-spot-run`: executes applicable mutations over validated project and optional held-out cases, returning provenance-separated results and real audit traces. The 12 project cases are not a representative benchmark; held-out data remain pending unless independently authored cases are supplied.
+- `POST /api/audit-receipt`: accepts a validated `AuditResponse` and returns a canonical receipt payload plus SHA-256 hashes. Hash coverage and normalization are documented in README.
+- `POST /api/repair-preview`: request contains answer, sources and `claim_id`; returns either a refusal reason or the exact one-token proposal, supporting trace and dry-run result.
+- `POST /api/repair-apply`: requires explicit approval and a short-lived one-use server token bound to the exact original answer, proposed answer, sources, and claim. The frontend clears stale findings and requires a fresh audit.
+
 ## Endpoints
 
 - `GET /api/health`: status, service name and current phase (3).
