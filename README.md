@@ -1,102 +1,422 @@
 # Refutella
 
-Refutella is an evidence-first audit workspace for inspecting AI-generated claims against user-provided source material. Its principle: **Don't blindly trust the answer. Don't blindly trust the auditor either.**
+### Evidence-first auditing for AI-generated answers
 
-## Product direction
+**Don't blindly trust the answer. Don't blindly trust the auditor either.**
 
-Intended users include readers, researchers, students, and reviewers. The long-term product includes claim verification, validated source references, precise localisation, narrow deterministic checks, reasoning consistency, uncertainty-aware reporting, safety flags, audit history/export, a labelled evaluation set, and the Evidence Stress Lab for controlled evidence edits. These are future goals, not current capabilities or novelty claims.
+Refutella is an evidence-auditing workspace that examines an answer claim by claim against source material supplied by the user. It helps reviewers locate contradictions, distinguish missing evidence from conflicting evidence, inspect the exact passages behind findings, and probe how results change when claims or sources are modified.
 
-## Phase 2
+Rather than presenting one confidence score for an entire answer, Refutella makes the evidence trail inspectable.
 
-React/TypeScript/Vite/Tailwind frontend; Python/FastAPI/Pydantic backend; version-controlled JSON fixtures; API-loaded scenario picker; validated character spans; useful errors and fixture labels. Exact unchanged fixture inputs retain their curated results. Other inputs use a local evidence-based baseline: sentence-span claims, BM25-style lexical passage retrieval and narrow number/date/polarity checks. In baseline mode, support requires normalized whole-claim textual identity; optional model mode can additionally use NLI for paraphrased passages. Lexical similarity alone never supports a claim. An optional local NLI verifier can be enabled with pre-installed dependencies and locally cached model files; it is off by default and makes no audit-time network calls. Quote validation proves presence at offsets, not truth.
+> **Important:** Refutella is a review aid, not a truth oracle. A `SUPPORTED` verdict is not a guarantee of universal truth, and `INSUFFICIENT_EVIDENCE` does not mean a claim is false.
 
-## Phase 3: evidence stress lab and document sources
+---
 
-The Evidence Stress Lab uses the current audit as its baseline and reruns the same audit engine after removing one source, removing a retrieved passage, or editing that passage. Results are request-scoped and include claim-by-claim verdicts and evidence. Fixture baselines and differing execution modes are flagged as not directly comparable. See `POST /api/stress-experiment` in the API contract. The controlled examples are not a general evaluation or a test of parametric memory leakage.
+## At a glance
 
-Source material can be entered manually or extracted locally from UTF-8 `.txt`, text-based `.pdf` (up to 200 pages), and `.docx` files. Uploads are held in memory and added to the same editable sources used by the existing audit. The default per-file limit is 10 MiB (`REFUTELLA_MAX_UPLOAD_BYTES` can change it); extracted text must fit the existing 30,000-character source limit, and manual plus uploaded sources share the existing maximum of eight. DOCX paragraphs and table cells are included. Scanned/image-only PDFs are not OCRed. PDF reading order for complex layouts may be imperfect. Files are not persisted by the backend.
+- **Claim-level findings:** inspect individual answer claims instead of relying on a single answer-level score.
+- **Evidence traceability:** review retrieved passages, source identifiers, offsets, and reason codes.
+- **Evidence matrix:** inspect the relationship between claims and each supplied source.
+- **Controlled stress tests:** remove a source, remove a retrieved passage, or edit a passage and rerun the audit.
+- **Mutation testing:** apply controlled changes to claims or evidence and compare the resulting audit behavior.
+- **Judge Challenge:** exercise curated challenge cases and track outcomes without rewarding failed or inconclusive runs.
+- **Reproducibility support:** export canonical JSON audit receipts and rerun comparisons.
+- **Cautious repair workflow:** preview a narrow, source-backed correction before explicitly approving it.
+- **Local-first optional NLI:** optionally run a locally cached Natural Language Inference model; the baseline remains available without it.
+- **Automated checks:** backend tests, evaluation tests, frontend production build, browser end-to-end tests, and an optional local NLI smoke test.
 
-## Structure
+## Why Refutella?
 
-- frontend/src: UI, styles, API types
-- backend: routes, models, fixture service, in-memory TXT/PDF/DOCX extraction
-- data/scenarios: example audits and expected labels
-- tests: API and fixture consistency tests
-- docs: SRS, architecture, API contract, test plan, research and handoff
+AI-generated answers can combine correct facts with incorrect details and claims that the available sources do not establish. A polished paragraph can make these different cases look equally convincing.
 
-## Prerequisites
+Manual verification is time-consuming. Search results may provide relevant pages without showing exactly which passage supports a particular sentence. An overall score can also hide the fact that one claim is contradicted while another simply lacks evidence.
 
-Python 3.11+, Node.js 20.19+ (required by Vite 8), npm and Git. Verified in the Windows QA environment with Python 3.12.14, Node 24.19.0 and npm 11.17.0.
+Refutella addresses this problem by making the **claim–evidence relationship** the centre of the review workflow.
 
-## Windows PowerShell setup
+### Design principles
 
-From repository root, run:
-    py -3.11 -m venv .venv
-    .venv/Scripts/python.exe -m pip install -r requirements.txt
-    cd frontend
-    npm install
-    cd ..
+1. **Evidence before confidence:** retrieve and expose source passages rather than treating fluent wording as proof.
+2. **Separate verdicts:** distinguish support, contradiction, insufficient evidence, ambiguity, and claims that were not assessed.
+3. **Inspectable findings:** provide claim-level explanations and source references that a person can review.
+4. **Controlled experiments:** change one part of the claim or evidence and observe how the audit responds.
+5. **Honest uncertainty:** expose limitations and known failure modes instead of claiming perfect detection.
 
+## Key features
 
-Start backend in terminal 1 from root:
-    .venv/Scripts/python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+### 1. Claim-by-claim audit workspace
 
-Optional local NLI mode (offline at audit time): install `.venv/Scripts/python.exe -m pip install -r requirements-nli.txt`, run the pinned `hf download` command in `docs/RESEARCH_NOTES.md`, then set `$env:REFUTELLA_NLI_MODEL_PATH = "models/refutella-nli"` before starting the backend. Missing dependencies or files leave the baseline available and return `MODEL_UNAVAILABLE`; no model weights are bundled or fetched by the API.
+- Choose a prepared scenario or edit the answer and supplied sources.
+- Represent an answer as sentence-sized claim spans.
+- View findings and category counts for the current audit.
+- Inspect a selected claim's explanation, technical details, source passage, and evidence references.
+- Keep character offsets tied to the exact answer text being reviewed.
+- Distinguish curated fixture results from findings generated by the live audit engine.
 
+### 2. Evidence retrieval and traceability
 
-Start frontend in terminal 2:
-    cd frontend
-    npm run dev
+- Retrieve candidate source passages using lexical retrieval with BM25-style ranking.
+- Return Search Receipts containing retrieved passages, exact source offsets, matched terms, and reason codes.
+- Inspect a claim/source evidence matrix to see which sources have candidate passages.
+- Annotate similar source text without removing sources or treating similarity as proof of independent provenance.
+- Validate that a quoted passage exists at the reported source offsets.
 
+**Interpretation matters:** retrieval indicates relevance, and quote validation indicates that text exists at a location. Neither alone proves that a claim is true or that the passage entails the entire claim.
 
-Open Vite's printed URL (normally http://localhost:5173). The Vite proxy forwards /api to 127.0.0.1:8000. FastAPI docs: http://127.0.0.1:8000/docs.
+### 3. Transparent verdicts and review cues
 
-## Checks
+The workspace separates claim verdicts from additional review cues.
 
-From repository root, run the backend suite:
-    .venv/Scripts/python.exe -m pytest
-Run only the reproducible API evaluation and print its counts:
-    .venv/Scripts/python.exe -m pytest tests/test_evaluation.py -q -s -p no:cacheprovider
-From `frontend/`, run the TypeScript check and production build:
-    npm run build
-Run the browser end-to-end checks against the local FastAPI backend:
-    npx playwright install chromium
-    npm run test:e2e
-The Playwright config starts Vite or reuses the server at port 5173; start FastAPI at 127.0.0.1:8000 first.
-The build command runs TypeScript checks and a production build. The evaluation uses 12 fixed single-claim API cases with defensible expected labels and three fixed Evidence Stress Lab behavior cases. One paraphrase case uses a deterministic mocked NLI entailment; it does not measure real model performance. The command prints observed and expected verdict counts, confusion counts and exact-label accuracy. These curated, rule-aligned cases are a regression set, not evidence of general real-world reliability, benchmark superiority or calibrated confidence. No model download or network is needed. See `docs/TEST_PLAN.md` and `docs/DEMO_WALKTHROUGH.md`.
+| Finding | Meaning |
+|---|---|
+| `SUPPORTED` | The supplied evidence supports the claim under the current audit checks. |
+| `CONTRADICTED` | The supplied evidence conflicts with the claim under the current checks. |
+| `INSUFFICIENT_EVIDENCE` / `NOT ENOUGH EVIDENCE` | The supplied material does not establish enough to verify the claim. |
+| `AMBIGUOUS` | The evidence–claim relationship is unclear or cannot safely be classified as a definite support/contradiction. |
+| `NOT ASSESSED` | The claim was not assessed by the applicable checks or was outside their scope. |
 
-## Sample data and reset
+Review cues can flag material such as advice, certainty, or inference for additional human attention. These cues are separate from verdicts and do not independently establish truth.
 
-The scenario selector loads fixtures through GET /api/scenarios. Select a scenario and run an audit. Editing answer/source keeps the selected scenario visible, marks the content as modified, and returns explicit insufficient evidence unless the full answer and source set still match a fixture. Use **Restore scenario** to reload its canonical answer and sources, or select another scenario to switch fixtures. Additional sources are included in the audit request and do not receive fixture findings unless the complete input exactly matches a supported fixture.
+### 4. Evidence Stress Lab
 
-## Limitations
+Run a controlled experiment against the current audit by changing the evidence set. Depending on the selected experiment, the system can:
 
-The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning. Optional NLI can also be wrong and is not calibrated. A local CPU smoke test ran in Phase 5A, including one paraphrase misclassification; it does not establish task accuracy. Retrieval may surface irrelevant passages. Numeric normalization and context matching are limited, and sentence splitting can mishandle abbreviations/punctuation. The controlled evaluation suite is not representative of general use. Phase 3 adds a request-scoped Evidence Stress Lab for source/passage removal and passage editing followed by a rerun of the existing engine. These observed outcomes are not a benchmark, reliability estimate, or test of parametric memory leakage; fixture baselines cannot be directly compared with live perturbed engine results. No history or export is included. Offsets use Python Unicode code-point indexes. Model feasibility findings are in docs/RESEARCH_NOTES.md.
+- remove a source;
+- remove a retrieved passage; or
+- edit a retrieved passage.
 
-Document extraction is best-effort plain text extraction: PDF columns and complex tables can be reordered, DOCX formatting is discarded, and OCR, password-protected PDFs, legacy `.doc`, and other formats are unsupported. Extraction is not a security scanner for malicious files; this local prototype only applies bounded upload size, basic file-format checks and in-memory parsing.
+The modified input is rerun through the audit engine, returning claim-level findings and evidence. Fixture baselines and live perturbed engine results are marked as not directly comparable when they use different execution modes.
 
-## Repeatable demo
+These experiments demonstrate sensitivity to supplied evidence. They are **not** a general reliability benchmark and do not test whether a model has leaked parametric memory.
 
-Follow [the demo walkthrough](docs/DEMO_WALKTHROUGH.md) for a short sequence using existing fixtures and custom source-driven examples. It records the expected mode labels and cautions where results depend on the current deterministic engine.
+### 5. Mutation and reliability tools
 
-## Team workflow and Git checkpoint
+The mutation catalog defines controlled edits to claims or source material. Available mutation classes include changes involving numbers, dates, negation, entities, quantifiers, wording, noise, duplication, ordering, and source removal or editing, subject to each mutation's preconditions.
 
-Member 1: backend and integration. Member 2: frontend and UI. Member 3: scenarios, evaluation, docs, presentation. Coordinate on docs/API_CONTRACT.md before editing types. Inspect status and diff before committing. Exclude .env, credentials, environments, node_modules, weights and caches.
+The workflow supports:
 
-Recommended checkpoint commands after review:
-    git status --short
-    git diff --check
-    git add README.md .gitignore .env.example requirements.txt backend frontend data tests docs
-    git diff --cached --stat
-    git commit -m "Build Refutella Phase 1 foundation"
-Inspect branch and git remote -v before any push. These steps do not push.
+- selecting and previewing a mutation;
+- running the modified input through the audit engine;
+- comparing the result with the baseline;
+- reviewing the expected outcome and limitations of the mutation;
+- inspecting blind-spot summaries across available evaluation cases.
 
-## Phase 5A credibility foundation
+Expected outcomes are declared before interpreting the result. Some mutations are intentionally untestable or inconclusive in a given mode; these must not be presented as successful detections.
 
-Source-driven audits preserve all answer spans and use narrow transparent triage to mark obvious questions, commands, short headings/transitions, and explicit opinions **Not assessed**. The separate count never means false or unsupported. Select **Include in audit** to override triage for a flagged span. Source IDs remain stable in API traces; the UI shows request-order `S1`, `S2` labels and titles. Findings include a plain-language summary, technical details, and an evidence/verdict guide. A quote found at offsets is provenance only; retrieval is relevance only; neither alone establishes support.
+### 6. Judge Challenge
 
-The pinned optional DeBERTa NLI model was smoke-tested on local CPU in Phase 5A. Load took about 17 seconds and pair inference was roughly 0.08–0.29 seconds in the tested environment. One alternate paraphrase was misclassified, so results remain fallible, uncalibrated and off by default. See `docs/RESEARCH_NOTES.md` for exact observations and setup.
+Judge Challenge provides curated challenge cases for probing audit behavior. The current scoring rule awards **one point only for `CAUGHT`**. `NOT_SUPPORTED`, `FALSE_SUPPORT`, `INCONCLUSIVE`, untestable, incomparable, and failed runs earn no points. Failed requests are excluded from the completed-run tally.
 
-## Phase 5B evidence intelligence
+The challenge interface includes curated examples, a scoreboard, and a reset action that clears the challenge history and scoreboard.
 
-Audits return per-claim Search Receipts containing retrieved passages, exact source offsets, matched terms, and reason codes. Similar source text is annotated without removing sources or implying independent provenance. A claim/source evidence matrix and separate certainty, advice, and inference review cues support human inspection. Review flags do not affect verdicts. An NLI-only contradiction is labeled ambiguous until a deterministic contradiction rule confirms it.
+Manually verified examples reported for the current implementation include:
+
+- **Contradiction detected:** changing `48` to `84` produced `CONTRADICTED`.
+- **Insufficient evidence:** changing “Some” to “All” produced `INSUFFICIENT_EVIDENCE`.
+- **Known false-support case:** removing the vocative comma in “We will eat, Grandma” left the result `SUPPORTED`, exposing a narrow English-language, punctuation-insensitive matching blind spot.
+
+The false-support example is a documented limitation, not a successful detection or evidence of broad language coverage.
+
+### 7. Canonical JSON audit receipts
+
+Refutella can export a canonical JSON receipt for the audit result being shown. Canonicalization normalizes text and JSON representation before hashing, including Unicode normalization, line endings, and key ordering. SHA-256 hashes help compare the answer, sources, and results without relying on incidental formatting.
+
+Receipts support reproducibility and comparison; they do **not** certify that an audit result is factually correct. Reruns may still differ when model or runtime behavior is nondeterministic.
+
+### 8. Narrow, approval-based repair preview
+
+The safe-repair workflow checks whether a finding qualifies for a constrained, source-backed correction. It is designed to refuse ambiguous cases and conflicting evidence rather than guess.
+
+Where a repair is supported, the system presents a preview before applying it. Explicit approval is required, and the approval is bound to the preview. The original answer should not be silently overwritten, and the repaired answer must be audited again.
+
+### 9. Local document ingestion
+
+Source material can be entered manually or extracted locally from:
+
+- UTF-8 `.txt` files;
+- text-based `.pdf` files, up to 200 pages;
+- `.docx` files, including paragraphs and table cells.
+
+Uploads are processed in memory and added to the same editable sources used by the audit. The default per-file limit is 10 MiB (`REFUTELLA_MAX_UPLOAD_BYTES` can change it). Extracted text must fit the existing 30,000-character source limit, and manual plus uploaded sources share the existing maximum of eight sources.
+
+Scanned/image-only PDFs are not OCRed. PDF reading order may be imperfect for complex layouts. Uploaded files are not persisted by the backend.
+
+---
+
+## How it works
+
+```text
+Answer + User-Provided Sources
+              |
+              v
+      Claim / Sentence Spans
+              |
+              v
+    Candidate Evidence Retrieval
+       (BM25-style lexical search)
+              |
+              v
+   Deterministic Checks + Evidence
+        and Quote Validation
+              |
+              v
+   Optional Local NLI Signal
+       (when configured)
+              |
+              v
+ Claim-Level Findings + Evidence Trace
+              |
+              v
+ Human Review / Stress Test / Mutation
+              |
+              v
+     Receipt, Comparison, or
+       Safe Repair Preview
+```
+
+The optional NLI stage is an additional signal, not a replacement for evidence inspection. The baseline remains usable without model weights.
+
+## Architecture and technology stack
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Frontend | React, TypeScript | Interactive claim review, source editing, findings, and experiment controls |
+| Frontend tooling | Vite | Local development server and production build |
+| Styling | Tailwind CSS | Layout, typography, spacing, and responsive UI styling |
+| Backend | Python | Audit logic, source extraction, mutation logic, and evaluation utilities |
+| API | FastAPI | HTTP endpoints connecting the frontend to backend operations |
+| Data validation | Pydantic | Structured request and response validation |
+| Evidence retrieval | BM25-style lexical retrieval | Ranks candidate source passages for claims |
+| Deterministic checks | Project-specific rules | Narrow checks for supported patterns such as numbers, dates, and polarity |
+| Optional model | Locally cached DeBERTa NLI model | Additional natural-language inference signal when explicitly configured |
+| Evaluation | JSON fixtures and pytest | Repeatable API, fixture, mutation, and backend tests |
+| Browser testing | Playwright | End-to-end checks of the user interface and key workflows |
+| Audit receipts | Canonical JSON + SHA-256 | Stable representation and integrity-oriented comparison of audit inputs/results |
+
+## Repository structure
+
+```text
+64Bit_college_round/
+├── backend/
+│   ├── main.py                 # FastAPI routes and application entry point
+│   ├── mutations.py            # Centralized mutation catalog
+│   └── phase5c.py              # Receipt, reliability, and repair utilities
+├── frontend/
+│   └── src/
+│       ├── Phase5CPanel.tsx    # Mutation, receipt, reliability, and challenge UI
+│       └── ...                 # Audit workspace, components, types, and styles
+├── data/
+│   ├── scenarios/              # Prepared audit scenarios and expected labels
+│   └── evaluation/
+│       └── heldout/             # Location for independent held-out cases
+├── tests/
+│   ├── test_phase5c.py          # Phase 5C backend coverage
+│   └── ...                      # API, fixture, and evaluation tests
+├── docs/
+│   ├── API_CONTRACT.md
+│   ├── DEMO_WALKTHROUGH.md
+│   ├── RESEARCH_NOTES.md
+│   └── TEST_PLAN.md
+├── requirements.txt
+├── requirements-nli.txt
+└── README.md
+```
+
+Some file names or module boundaries may change as implementation evolves; consult the repository for the current complete tree.
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 20.19+ (required by Vite 8)
+- npm
+- Git
+
+The Windows QA environment was reported as Python 3.12.14, Node 24.19.0, and npm 11.17.0.
+
+### 1. Clone and create the Python environment
+
+Run these commands in **Windows PowerShell** from the repository root:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+If `py -3.11` is unavailable but another compatible Python version is installed, create the environment with that interpreter instead.
+
+### 2. Install frontend dependencies
+
+```powershell
+cd frontend
+npm install
+cd ..
+```
+
+### 3. Start the backend
+
+Open a terminal at the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+FastAPI interactive API documentation:
+
+- <http://127.0.0.1:8000/docs>
+
+### 4. Start the frontend
+
+Open a second terminal at the repository root:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Open the URL printed by Vite, normally:
+
+- <http://localhost:5173>
+
+The Vite proxy forwards `/api` requests to `127.0.0.1:8000`.
+
+### Optional: enable local NLI mode
+
+The NLI verifier is optional and off by default. It requires the optional dependencies and locally cached model files. It does not download model weights during an audit.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-nli.txt
+```
+
+Follow the pinned model-download command in `docs/RESEARCH_NOTES.md`, then set the local model path before starting the backend:
+
+```powershell
+$env:REFUTELLA_NLI_MODEL_PATH = "models/refutella-nli"
+```
+
+Missing dependencies or model files should leave the baseline available and return `MODEL_UNAVAILABLE`. No model weights are bundled with the repository.
+
+---
+
+## Testing and evaluation
+
+Run the backend test suite from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Run the reproducible API evaluation and print its counts:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_evaluation.py -q -s -p no:cacheprovider
+```
+
+Build and type-check the frontend from `frontend/`:
+
+```powershell
+npm run build
+```
+
+Run browser end-to-end tests against the local backend. Start FastAPI at `127.0.0.1:8000` first:
+
+```powershell
+npx playwright install chromium
+npm run test:e2e
+```
+
+The Playwright configuration starts Vite or reuses the server on port 5173.
+
+### Reported Phase 5C verification
+
+The latest implementation report provided for this README revision reported:
+
+| Check | Result |
+|---|---:|
+| Backend suite | 78 passed, 1 skipped |
+| Evaluation suite | 1 passed |
+| Frontend production build | Passed |
+| Playwright end-to-end suite | 20 passed |
+| Local NLI smoke test | 1 passed |
+| `git diff --check` | Passed |
+
+The evaluation command covered 12 fixed audit cases and three fixed Evidence Stress Lab behavior cases. One paraphrase case uses a deterministic mocked NLI entailment; it does not measure real model performance.
+
+A Windows temporary-directory cleanup `PermissionError` was reported at process exit despite successful test completion. This is recorded as a cleanup warning, not silently treated as a passing test.
+
+These results describe the current automated checks. They are not evidence of general real-world accuracy, calibrated confidence, or superiority over other systems.
+
+### Held-out evaluation status
+
+The project evaluation cases are useful for regression testing, but they are not independent benchmark evidence. The separate `data/evaluation/heldout/` directory currently contains a README only. An independent set of **40 cases authored without first reading the implementation rules** is still needed before the held-out reliability evaluation can be reported as completed.
+
+Do not claim a held-out accuracy score until that dataset has been supplied, run, and documented.
+
+---
+
+## Demo walkthrough
+
+For a repeatable live demonstration, follow [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md).
+
+Suggested sequence:
+
+1. Select the **Harbor field study** fixture and point out that it is in fixture mode.
+2. Compare the answer's claim of **84 volunteers** with the source note's **48 volunteers**.
+3. Select each claim to show how a supported date, contradicted number, and insufficiently evidenced detail receive different findings.
+4. Inspect the Evidence Matrix and Evidence Trace to show the source passage behind a finding.
+5. Run an Evidence Stress Lab experiment by removing or editing evidence.
+6. Select and run a mutation, then compare the resulting audit.
+7. Demonstrate Judge Challenge scoring and reset. Include the false-support case as a disclosed limitation.
+8. If the API is available, export an audit receipt or load the blind-spot report.
+9. Explain that independent held-out evaluation remains pending.
+
+**Live-demo check:** if the Mutation & Reliability panel displays `Mutation or challenge catalog endpoint is unavailable`, verify that the backend is running, the frontend API proxy is correct, and the catalog request succeeds before demonstrating those controls.
+
+---
+
+## Limitations and responsible interpretation
+
+- The baseline cannot reliably verify paraphrases, complex claims, tables, or general reasoning.
+- Optional NLI can be wrong and is not calibrated. It is disabled by default.
+- The NLI smoke test and one observed paraphrase misclassification do not establish task accuracy.
+- Retrieval may surface irrelevant passages. Lexical relevance alone never establishes support.
+- Number normalization, context matching, sentence splitting, and punctuation handling are limited.
+- A known challenge demonstrates a punctuation-insensitive false-support case in a narrow English-language example.
+- Exact quote validation proves text presence at offsets, not the truth of a claim.
+- Curated fixture findings are not live model assessments.
+- Fixture baselines may not be directly comparable with live perturbed engine results.
+- The fixed project evaluation is a regression set, not a representative benchmark or calibrated reliability estimate.
+- The independent 40-case held-out evaluation is pending.
+- Document extraction is best-effort plain-text extraction. PDF columns and complex tables may be reordered, DOCX formatting is discarded, and OCR, password-protected PDFs, legacy `.doc`, and other formats are unsupported.
+- Extraction is not a security scanner for malicious files. The local prototype applies bounded upload size, basic file-format checks, and in-memory parsing.
+- The backend does not persist uploaded files or provide a complete long-term audit-history system.
+
+## Team workflow
+
+- **Member 1:** backend and integration
+- **Member 2:** frontend and UI
+- **Member 3:** scenarios, evaluation, documentation, and presentation
+
+Coordinate API and type changes through [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md). Before committing, inspect the current branch, working tree, and diff. Do not include credentials, `.env` files, virtual environments, `node_modules`, model weights, or caches.
+
+Example review commands:
+
+```powershell
+git status --short
+git diff --check
+git diff
+```
+
+After reviewing and staging only the intended files:
+
+```powershell
+git diff --cached --stat
+```
+
+Commit only after verifying the staged diff. These commands do not push changes.
+
+## License
+
+Check the repository's license file for the project's current licensing terms.
