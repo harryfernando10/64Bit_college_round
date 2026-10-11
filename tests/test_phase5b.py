@@ -1,5 +1,6 @@
 from backend.models import AuditRequest
-from backend.service import _duplicate_sources, run_audit
+from types import SimpleNamespace
+from backend.service import _check, _duplicate_sources, run_audit
 
 
 def test_receipt_uses_retrieved_passage_and_exact_unicode_offsets():
@@ -46,3 +47,50 @@ def test_review_flags_do_not_change_verdict_and_duplicate_remains_visible():
     assert result.claims[0].verdict.value == "INSUFFICIENT_EVIDENCE"
     assert result.claims[0].search_receipt.candidates[1].duplicate_of == "a"
     assert any(flag.flag_type == "CERTAINTY_DRIFT" for flag in result.claims[0].review_flags)
+
+
+def test_duration_rule_converts_days_and_weeks_but_abstains_on_months():
+    verdict, checks, _ = _check("The trial lasted 4 weeks.", "The trial lasted 28 days.")
+    assert verdict is None
+    assert any(check.check_type == "duration" and check.status == "MATCH" for check in checks)
+    verdict, checks, _ = _check("The trial lasted 4 weeks.", "The trial lasted 30 days.")
+    assert verdict == "CONTRADICTED"
+    assert any(check.check_type == "duration" and check.status == "MISMATCH" for check in checks)
+    verdict, checks, _ = _check("The trial lasted 4 weeks.", "The trial lasted one month.")
+    assert verdict is None
+    assert not any(check.check_type == "duration" for check in checks)
+
+
+def test_known_month_week_nli_conflict_cannot_create_contradicted_verdict():
+    class MisclassifyingVerifier:
+        available = True
+        model_id = "mock-month-week"
+        detail = ""
+
+        def verify(self, premise, hypothesis):
+            return SimpleNamespace(label="CONTRADICTION", model_id=self.model_id, raw_logits={"contradiction": 1.0}, detail="Mocked known failure mode")
+
+    result = run_audit(AuditRequest(answer="The trial lasted 4 weeks.", sources=[
+        {"source_id": "s", "title": "Study", "text": "The trial lasted 1 month."},
+    ]), verifier=MisclassifyingVerifier())
+    assert result.claims[0].verdict.value != "CONTRADICTED"
+    assert result.claims[0].verification_tier.value == "MODEL_FLAG"
+
+
+def test_localization_returns_exact_unicode_date_quantity_and_polarity_spans():
+    cases = [
+        ("The café trial counted 84 plants.", "The café trial counted 48 plants.", "84", "48", "QUANTITY_OR_DURATION_MISMATCH"),
+        ("The café trial ended on March 4, 2024.", "The café trial ended on March 5, 2024.", "March 4, 2024", "March 5, 2024", "DATE_MISMATCH"),
+        ("The office is open on Monday.", "The office is closed on Monday.", "open", "closed", "POLARITY_MISMATCH"),
+    ]
+    for answer, source_text, answer_token, source_token, rule_id in cases:
+        result = run_audit(AuditRequest(answer=answer, sources=[{"source_id": "s", "title": "Note", "text": source_text}]))
+        localization = result.claims[0].error_localizations[0]
+        assert localization.rule_id == rule_id
+        assert answer[localization.claim_start_offset:localization.claim_end_offset] == answer_token
+        assert source_text[localization.source_start_offset:localization.source_end_offset] == source_token
+
+    ambiguous = run_audit(AuditRequest(answer="The trial counted 84 plants and 12 trees.", sources=[
+        {"source_id": "s", "title": "Note", "text": "The trial counted 48 plants and 18 trees."},
+    ]))
+    assert ambiguous.claims[0].error_localizations == []

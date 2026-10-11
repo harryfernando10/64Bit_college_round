@@ -53,3 +53,9 @@ Question, command, heading and explicit opinion patterns appear as **Not assesse
 # Phase 5B review
 
 After running an audit, inspect the claim/source evidence matrix and select a source cell to change the active claim. The selected claim's Search Receipt lists its retrieved passages and offsets. Review flags appear separately and never change verdicts. Duplicate-source labels identify similar supplied text while keeping each source visible.
+
+## Phase 5C tools
+
+After a live audit, use **Mutation & reliability tools** to select an evidence or claim mutation. Read its preconditions, declared expectation, ground-truth limits and warnings before running it. Compare the actual baseline and perturbed claim traces; a verdict change is not proof that the original result was wrong, and an unchanged verdict does not prove independence. The Judge Challenge panel only scores a completed comparable claim run when the catalog declares a testable expectation; inconclusive cases remain unscored. Use Reset challenge session to clear displayed session counts.
+
+The receipt export asks for confirmation because it contains the answer and source text. It downloads locally as JSON and includes canonical hashes; hashes show canonical identity, not factual correctness. The Blind-Spot Map reports project and held-out provenance separately. Held-out evaluation is pending until 40+ independent cases are provided. Safe repair previews may refuse; if offered, inspect the one-token diff and source quote, then explicitly approve. The app clears prior findings and requires a new audit after applying.

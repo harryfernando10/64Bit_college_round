@@ -15,7 +15,7 @@ import hashlib
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "data" / "scenarios"
 TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
-NUMBER = re.compile(r"(?<!\w)[+-]?\d+(?:\.\d+)?(?:\s*(?:%|cm|mm|m|km|kg|g|mg|°[CF]|hours?|days?|years?))?", re.I)
+NUMBER = re.compile(r"(?<!\w)[+-]?\d+(?:\.\d+)?(?:\s*(?:%|cm|mm|m|km|kg|g|mg|°[CF]|hours?|days?|weeks?|months?|years?))?", re.I)
 NEGATIONS = {"not", "no", "never", "neither", "cannot", "cant", "without", "doesnt", "isnt", "arent", "wont"}
 CONTEXT_STOPWORDS = {"the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "to", "of", "in", "on", "at", "for", "by", "and", "or", "it", "this", "that", "with", "from", "as", "after", "before"}
 
@@ -95,7 +95,7 @@ def _values(text):
     values = []
     for match in NUMBER.finditer(without_dates):
         raw_number = re.search(r"[+-]?\d+(?:\.\d+)?", match.group(0)).group(0)
-        unit_match = re.search(r"(?:%|cm|mm|km|m|kg|mg|g|°[CF]|hours?|days?|years?)$", match.group(0).strip(), re.I)
+        unit_match = re.search(r"(?:%|cm|mm|km|m|kg|mg|g|°[CF]|hours?|days?|weeks?|months?|years?)$", match.group(0).strip(), re.I)
         try:
             value = Decimal(raw_number).normalize()
         except InvalidOperation:
@@ -167,6 +167,16 @@ def _check(claim, passage):
         mismatch = cvals != evals
         checks.append(DeterministicCheck(check_type="quantity_or_unit", status="MISMATCH" if mismatch else "MATCH", detail=f"Compared values in shared context: claim {cvals}; passage {evals}."))
         if mismatch: return "CONTRADICTED", checks, "The retrieved passage gives a different quantity or unit for the same overlapping context."
+    # Days and weeks have a fixed conversion. Calendar months deliberately do
+    # not: their length varies, so month/week pairs abstain from this rule.
+    duration_days = {"day": Decimal(1), "days": Decimal(1), "week": Decimal(7), "weeks": Decimal(7)}
+    if len(cvals) == len(evals) == 1 and cvals[0][1] in duration_days and evals[0][1] in duration_days and same_context:
+        claim_days = cvals[0][0] * duration_days[cvals[0][1]]
+        passage_days = evals[0][0] * duration_days[evals[0][1]]
+        mismatch = claim_days != passage_days
+        checks.append(DeterministicCheck(check_type="duration", status="MISMATCH" if mismatch else "MATCH",
+            detail=f"Compared durations using the fixed day/week conversion: claim {claim_days} days; passage {passage_days} days."))
+        if mismatch: return "CONTRADICTED", checks, "The retrieved passage gives a different duration after a fixed day/week conversion."
     if len(date_c) == len(date_e) == 1 and same_context:
         mismatch = date_c != date_e
         checks.append(DeterministicCheck(check_type="date", status="MISMATCH" if mismatch else "MATCH", detail=f"Compared dates in shared context: claim {date_c}; passage {date_e}."))
@@ -191,6 +201,61 @@ def _check(claim, passage):
                 return "CONTRADICTED", checks, "The passage uses an explicit opposite predicate in otherwise identical wording."
     if not checks: checks.append(DeterministicCheck(check_type="numeric_date_polarity", status="NOT_CHECKED", detail="No safely comparable discrepancy rule applied."))
     return None, checks, ""
+
+def _localize_mismatch(claim, passage, claim_start, ref):
+    """Return exact token pairs only when a narrow rule identifies one pair."""
+    number_spans = lambda text: [match for match in NUMBER.finditer(text)
+        if not any(date.start() <= match.start() and match.end() <= date.end() for date in _DATE_PATTERN.finditer(text))]
+    left = right = None
+    rule_id = ""
+    explanation = ""
+    dates_left, dates_right = list(_DATE_PATTERN.finditer(claim)), list(_DATE_PATTERN.finditer(passage))
+    if len(dates_left) == len(dates_right) == 1 and _date_values(claim) != _date_values(passage):
+        left, right, rule_id = dates_left[0], dates_right[0], "DATE_MISMATCH"
+        explanation = "These uniquely identified date spans differ under the deterministic date rule."
+    elif len(number_spans(claim)) == len(number_spans(passage)) == 1 and _values(claim) != _values(passage):
+        left, right, rule_id = number_spans(claim)[0], number_spans(passage)[0], "QUANTITY_OR_DURATION_MISMATCH"
+        explanation = "These uniquely identified quantity or duration spans differ under the deterministic comparison rule."
+    else:
+        negation = re.compile(r"\b(?:not|no|never|neither|cannot|can't|without|doesn't|isn't|aren't|won't)\b", re.I)
+        left_neg, right_neg = list(negation.finditer(claim)), list(negation.finditer(passage))
+        if len(left_neg) <= 1 and len(right_neg) <= 1 and len(left_neg) != len(right_neg):
+            negative, positive = (right_neg[0], claim) if right_neg else (left_neg[0], passage)
+            positive_tokens = list(TOKEN.finditer(positive))
+            next_token = next((token for token in positive_tokens if token.start() >= negative.end()), None)
+            counterpart_text = next_token.group(0) if next_token else ""
+            counterpart = list(re.finditer(rf"\b{re.escape(counterpart_text)}\b", claim if right_neg else passage, re.I)) if counterpart_text else []
+            if len(counterpart) == 1:
+                if right_neg:
+                    left = counterpart[0]
+                    right = _LocatedSpan(negative.start(), next_token.end(), passage[negative.start():next_token.end()])
+                else:
+                    right = counterpart[0]
+                    left = _LocatedSpan(negative.start(), next_token.end(), claim[negative.start():next_token.end()])
+                rule_id = "POLARITY_MISMATCH"
+                explanation = "The deterministic polarity rule identified a single negation and its matching predicate."
+        if left is None and right is None:
+            left_tokens, right_tokens = list(TOKEN.finditer(claim)), list(TOKEN.finditer(passage))
+            differences = [(a, b) for a, b in zip(left_tokens, right_tokens) if a.group(0).casefold() != b.group(0).casefold()]
+            antonyms = ({"open", "closed"}, {"available", "unavailable"}, {"enabled", "disabled"}, {"present", "absent"})
+            if len(left_tokens) == len(right_tokens) and len(differences) == 1 and {differences[0][0].group(0).casefold(), differences[0][1].group(0).casefold()} in antonyms:
+                left, right = differences[0]
+                rule_id = "POLARITY_MISMATCH"
+                explanation = "The deterministic polarity rule identified one explicit antonym pair."
+    if left is None or right is None:
+        return None
+    left_start, left_end = claim_start + left.start(), claim_start + left.end()
+    right_start, right_end = ref.start_offset + right.start(), ref.start_offset + right.end()
+    return ErrorLocalization(rule_id=rule_id, explanation=explanation, claim_start_offset=left_start,
+        claim_end_offset=left_end, claim_text=left.group(0), source_id=ref.source_id,
+        sentence_id=ref.sentence_id, source_start_offset=right_start, source_end_offset=right_end,
+        source_text=right.group(0))
+
+class _LocatedSpan:
+    def __init__(self, start, end, text): self._start, self._end, self._text = start, end, text
+    def start(self): return self._start
+    def end(self): return self._end
+    def group(self, *args): return self._text
 
 _AUTO_VERIFIER = object()
 
@@ -241,12 +306,15 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
             matched_terms=matched, reason_code=reason, duplicate_of=duplicate_of))
         refs.append(EvidenceReference(source_id=source_id, sentence_id=s.sentence_id, quote=s.text,
             start_offset=s.start_offset, end_offset=s.end_offset, quotation_validated=True))
-    checks=[]; conflict=False; supported=False; contradiction=None
+    checks=[]; conflict=False; supported=False; contradiction=None; error_localizations=[]
     model_entailments=[]; model_contradictions=[]; model_unknown=[]; model_failures=[]; semantic=[]
     for ref in refs:
         passage = next(s.text for s in sentences if s.sentence_id == ref.sentence_id)
         verdict, checkset, _ = _check(claim.text, passage); checks.extend(checkset)
-        if verdict == "CONTRADICTED": contradiction = ref
+        if verdict == "CONTRADICTED":
+            contradiction = ref
+            localized = _localize_mismatch(claim.text, passage, claim.start_offset, ref)
+            if localized: error_localizations.append(localized)
         if not any(ch in set('"“”‘’') for ch in passage) and _normal(claim.text) == _normal(passage):
             supported = True
         if verifier is not None:
@@ -332,7 +400,8 @@ def _audit_claim(i, claim, sentences, request, verifier=None, assess_flagged=Fal
         semantic_verifications=semantic, note=note, model_score=None, model_score_calibrated=None,
         search_receipt=SearchReceipt(query_terms=list(dict.fromkeys(_tokens(claim.text))), status=receipt_status,
             candidates=receipt_candidates, reason_code=receipt_reason),
-        review_flags=review_claim(finding_id, claim.text, flag_candidates))
+        review_flags=review_claim(finding_id, claim.text, flag_candidates),
+        error_localizations=error_localizations)
 
 def run_audit(request: AuditRequest, verifier=_AUTO_VERIFIER) -> AuditResponse:
     data = _fixture(request.scenario_id) if request.scenario_id else None

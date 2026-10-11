@@ -29,6 +29,133 @@ test.afterEach(async ({}, testInfo) => {
   });
 });
 
+test('core upload and audit workflow works with external browser requests blocked', async ({ page }, testInfo) => {
+  const blocked: string[] = [];
+  const succeeded: string[] = [];
+  const requestsSeen: string[] = [];
+  page.on('response', response => {
+    const url = new URL(response.url());
+    const appOrigin = new URL(testInfo.project.use.baseURL as string).origin;
+    if (url.origin !== appOrigin && url.origin !== 'http://127.0.0.1:8001') succeeded.push(response.url());
+  });
+  await page.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    requestsSeen.push(`${route.request().method()} ${url.href} (${route.request().resourceType()})`);
+    const appOrigin = new URL(testInfo.project.use.baseURL as string).origin;
+    const local = url.origin === appOrigin || url.origin === 'http://127.0.0.1:8001';
+    if (!local) { blocked.push(route.request().url()); await route.abort('blockedbyclient'); return; }
+    await route.continue();
+  });
+  await page.reload();
+  await expect(page.getByLabel('Sample scenario')).toBeEnabled();
+  await page.getByLabel('Answer under review').fill('The garden trial ended after four weeks.');
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Upload documents' }).click();
+  await (await chooserPromise).setFiles('e2e/fixtures/evidence.pdf');
+  await expect(page.getByLabel('Source text evidence.pdf')).toHaveValue(/The garden trial ended after four weeks\./);
+  const audit = page.waitForResponse(r => r.url().includes('/api/audit') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  expect((await audit).status()).toBe(200);
+  await expect(page.locator('.summary-stats .stat.supported strong')).toHaveText('1');
+  expect(succeeded).toEqual([]);
+  expect(requestsSeen.some(request => request.includes('/api/extract-document'))).toBeTruthy();
+  expect(requestsSeen.some(request => request.includes('/api/audit'))).toBeTruthy();
+  console.log(`[network-isolation] browser requests observed: ${requestsSeen.length}; successful external requests: ${succeeded.length}; blocked external attempts: ${blocked.length}`);
+});
+
+test('Phase 5C mutation, receipt, pending evaluation, repair refusal and compare workflows', async ({ page }) => {
+  await page.getByLabel('Answer under review').fill('The report lists 48 volunteers.');
+  await page.getByLabel(/^Source text /).first().fill('The report lists 48 volunteers.');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  await expect(page.getByRole('heading', { name: 'Custom input review' })).toBeVisible();
+  const mutation = page.getByLabel('Mutation', { exact: true });
+  await expect(mutation.locator('option', { hasText: 'Change claim number' })).toHaveCount(1);
+  await mutation.selectOption('number.claim');
+  await page.getByLabel('Exact text to change').fill('48');
+  await page.getByLabel('Replacement text').fill('84');
+  await page.getByRole('button', { name: 'Preview and run mutation' }).click();
+  await expect(page.getByRole('heading', { name: 'Change claim number' })).toBeVisible();
+  await expect(page.locator('.outcome-badge')).toHaveText('EXPECTED OBSERVED');
+  await expect(page.getByText(/claim-1: CONTRADICTED/)).toBeVisible();
+  await page.getByRole('button', { name: 'Load Blind-Spot Map' }).click();
+  await expect(page.getByText(/Independently authored held-out cases are pending/)).toBeVisible();
+  await page.getByRole('button', { name: 'Check safe repair' }).click();
+  await expect(page.getByRole('heading', { name: 'Conservative repair preview' })).toBeVisible();
+  await expect(page.getByText(/did not establish a localized numeric\/date contradiction/)).toBeVisible();
+  await page.getByRole('button', { name: 'Re-run and compare' }).click();
+  await expect(page.getByRole('heading', { name: 'Re-run comparison' })).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export audit receipt' }).click();
+  expect((await download).suggestedFilename()).toBe('refutella-audit-receipt.json');
+});
+
+test('claim challenge uses the declared comparison and reset clears session tally', async ({ page }) => {
+  await page.getByLabel('Answer under review').fill('The report lists 48 volunteers.');
+  await page.getByLabel(/^Source text /).first().fill('The report lists 48 volunteers.');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  await page.getByLabel('Mutation', { exact: true }).selectOption('number.claim');
+  await page.getByLabel('Exact text to change').fill('48');
+  await page.getByLabel('Replacement text').fill('84');
+  await page.getByRole('button', { name: 'Preview and run mutation' }).click();
+  await expect(page.locator('.scoreboard')).toContainText('1');
+  await expect(page.locator('.score-total')).toContainText('1');
+  await expect(page.locator('.scoreboard')).toContainText('Completed runs');
+  await expect(page.getByRole('list', { name: 'Challenge history' }).getByText(/CAUGHT/)).toBeVisible();
+  await page.getByRole('button', { name: 'Reset challenge session' }).click();
+  await expect(page.locator('.score-total')).toContainText('0');
+  await expect(page.locator('.scoreboard')).toContainText('Completed runs');
+});
+
+test('curated false support and untestable challenge runs earn no points and reset clears all history', async ({ page }) => {
+  await page.getByLabel('Answer under review').fill('The report lists 48 volunteers.');
+  await page.getByLabel(/^Source text /).first().fill('The report lists 48 volunteers.');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  await page.getByRole('button', { name: 'Run challenge' }).nth(2).click();
+  await expect(page.locator('.scoreboard')).toContainText('FALSE_SUPPORT');
+  await expect(page.locator('.score-total')).toContainText('0');
+  await expect(page.locator('.scoreboard')).toContainText('Completed runs');
+  await expect(page.getByText(/claim-1: SUPPORTED/)).toBeVisible();
+
+  await page.getByLabel('Mutation', { exact: true }).selectOption('paraphrase.claim');
+  await page.getByLabel('Replacement claim').fill('A newly worded statement with unknown meaning.');
+  await page.getByRole('button', { name: 'Preview and run mutation' }).click();
+  await expect(page.locator('.mutation-result')).toContainText('UNTESTABLE');
+  await expect(page.locator('.score-total')).toContainText('0');
+  await expect(page.getByRole('list', { name: 'Challenge history' }).getByText(/FALSE_SUPPORT/)).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Challenge history' }).getByText(/UNTESTABLE/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Reset challenge session' }).click();
+  await expect(page.locator('.score-total')).toContainText('0');
+  await expect(page.getByRole('list', { name: 'Challenge history' })).toHaveCount(0);
+});
+
+test('mutation challenge cards stay distinct and fit a narrow viewport', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: 'Mutation & Reliability' })).toBeVisible();
+  await expect(page.getByText('Select a mutation to see its description, preconditions, and controls.')).toBeVisible();
+  await expect(page.locator('.challenge-card')).toHaveCount(3);
+  await expect(page.locator('.challenge-card').nth(0)).toContainText('Expected');
+  await expect(page.locator('.challenge-card').nth(0)).toContainText('Not run');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const widths = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+  await expect(page.locator('.challenge-card')).toHaveCount(3);
+});
+
+test('preview-bound repair approval applies only the proposed answer and clears old audit', async ({ page }) => {
+  await page.getByLabel('Answer under review').fill('The report lists 84 volunteers.');
+  await page.getByLabel(/^Source text /).first().fill('The report lists 48 volunteers.');
+  await page.getByRole('button', { name: 'Run audit' }).click();
+  await page.getByRole('button', { name: 'Check safe repair' }).click();
+  await expect(page.getByRole('heading', { name: 'Conservative repair preview' })).toBeVisible();
+  await expect(page.getByText('After: 48')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Approve and apply repair' }).click();
+  await expect(page.getByLabel('Answer under review')).toHaveValue('The report lists 48 volunteers.');
+  await expect(page.getByText('Your findings will appear here')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Run audit/ })).toBeEnabled();
+});
+
 test('captures reviewed demo screenshots at laptop and mobile sizes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: '../docs/qa-screenshots/after-initial-workspace-1440.png', fullPage: true });
@@ -353,7 +480,8 @@ test('real API validation returns 422 details and the UI reports transport failu
   });
   expect(health.status).toBe(200);
   expect(health.body.service).toBe('refutella-api');
-  expect(health.body.phase).toBe(3);
+  expect(health.body.phase).toBe(5);
+  expect(health.body.subphase).toBe('5C');
   const invalid = await page.evaluate(async () => {
     const response = await fetch('/api/audit', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -442,13 +570,20 @@ test('evidence matrix switches claims and receipt can select exact source offset
   await page.getByRole('button', { name: 'Run audit' }).click();
   await expect(page.getByRole('heading', { name: 'Evidence matrix' })).toBeVisible();
   await expect(page.getByText('Search Receipt · RETRIEVED')).toBeVisible();
+  await expect(page.getByText('Localized mismatch')).toBeVisible();
+  await page.getByText('Localized mismatch').click();
+  await page.getByRole('button', { name: 'Show source mismatch' }).click();
+  await expect(page.locator('.mismatch-localization mark').first()).toHaveText('2024');
+  const source = page.getByLabel(/^Source text /).first();
+  const sourceSelection = await source.evaluate((element: HTMLTextAreaElement) => element.value.slice(element.selectionStart, element.selectionEnd));
+  expect(sourceSelection).toBe('2023');
   await page.getByText('Search Receipt · RETRIEVED').click();
   await expect(page.getByText('CONTRADICTION_RULE')).toBeVisible();
   await page.screenshot({ path: '../docs/qa-screenshots/phase5b-search-receipt-matrix-1440.png', fullPage: true });
   const show = page.getByRole('button', { name: 'Show in source' }).first();
   await show.click();
-  const source = page.getByLabel(/^Source text /).first();
-  const selection = await source.evaluate((element: HTMLTextAreaElement) => element.value.slice(element.selectionStart, element.selectionEnd));
+  const sourceText = page.getByLabel(/^Source text /).first();
+  const selection = await sourceText.evaluate((element: HTMLTextAreaElement) => element.value.slice(element.selectionStart, element.selectionEnd));
   expect(selection).toBe('The café opened in 2023.');
   await expect(page.getByRole('region', { name: 'Claim and source evidence matrix' })).toBeVisible();
 });
